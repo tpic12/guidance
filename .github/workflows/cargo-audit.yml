@@ -1,0 +1,37 @@
+name: cargo-audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/cargo-audit.yml
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/cargo-audit.yml
+  schedule:
+    # Catch newly-published advisories against dependencies we already pinned.
+    - cron: "0 6 * * 1"
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      checks: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # RUSTSEC-2023-0071 (rsa timing sidechannel, no patch available):
+          # pulled in transitively via sqlx-mysql, a backend we never enable
+          # (only the "sqlite" sqlx feature is on) or connect to at runtime.
+          ignore: RUSTSEC-2023-0071
