@@ -35,6 +35,17 @@ async function deleteCharacter(page: Page, name: string) {
   await expect(card).toHaveCount(0);
 }
 
+// An ASI slot's Feat choice replaced its old plain `<select>` of feat
+// options with a hover-to-preview/click-to-select list (mirroring Species
+// and Background) — this switches the slot to "Feat" and clicks the named
+// row instead of selecting an `<option>` by label.
+async function pickAsiFeat(page: Page, levelLabel: string, featName: string) {
+  const slot = page.locator("div.rounded-box").filter({ hasText: levelLabel });
+  await slot.locator("select").first().selectOption("feat");
+  await slot.getByRole("button", { name: featName }).click();
+  return slot;
+}
+
 test("the wizard builds a level 5 warrior and renders its sheet", async ({ page }) => {
   const name = uniqueName("Wizard Flow Hero");
   await goto(page, "/characters");
@@ -100,9 +111,7 @@ test("the wizard builds a level 5 warrior and renders its sheet", async ({ page 
   await next(page); // spells -> asi
 
   // Level 4 ASI slot -> feat
-  const slot = page.locator("div.rounded-box").filter({ hasText: "Level 4 improvement" });
-  await slot.locator("select").first().selectOption("feat");
-  await slot.locator("select").nth(1).selectOption({ label: "Fake Brawler (TBK)" });
+  await pickAsiFeat(page, "Level 4 improvement", "Fake Brawler");
   await next(page);
 
   // Review: d10 at level 5 with Con 13 (+1) = 10 + 4*6 + 5 = 39 HP
@@ -224,9 +233,7 @@ test("an unfilled ASI slot blocks the Review checklist and disables Save", async
   await expect(page.getByRole("button", { name: "Save Character" })).toBeDisabled();
 
   await page.getByRole("button", { name: "Feats & ASIs" }).click();
-  const slot = page.locator("div.rounded-box").filter({ hasText: "Level 4 improvement" });
-  await slot.locator("select").first().selectOption("feat");
-  await slot.locator("select").nth(1).selectOption({ label: "Fake Brawler (TBK)" });
+  await pickAsiFeat(page, "Level 4 improvement", "Fake Brawler");
 
   await goToTab(page, "Review");
   await expect(page.getByRole("button", { name: "Feats & ASIs" })).toHaveCount(0);
@@ -631,6 +638,13 @@ test("the optional features step boxes sections in an adaptive grid, highlights 
   await expect(grid).toHaveClass(/max-w-xl/);
   await expect(grid).not.toHaveClass(/md:grid-cols-2/);
 
+  // A single checklist next to a fixed-width detail panel leaves the panel
+  // looking stranded in empty space, so it grows (flex-1) to fill the row
+  // instead once there's only one list to show it next to.
+  const panel = page.locator('div[class*="lg:sticky"]');
+  await expect(panel).toHaveClass(/flex-1/);
+  await expect(panel).not.toHaveClass(/lg:w-96/);
+
   const fightingStyleSection = page.locator("h3", { hasText: "Fighting Style" }).locator("..");
   await expect(fightingStyleSection).toHaveClass(/card/);
   await expect(fightingStyleSection).toHaveClass(/bg-base-200/);
@@ -643,7 +657,8 @@ test("the optional features step boxes sections in an adaptive grid, highlights 
 
   // Raising the level to 5 and picking Fake Fist (unlocked at level 3, and
   // required once unlocked) adds a second section (Maneuver) — the grid
-  // should widen to two columns.
+  // should widen to two columns, and the panel switches back to a
+  // fixed-width sidebar since it now sits beside a wider, two-column list.
   await goToTab(page, "Class");
   await setClassLevel(page, /Fake Warrior/, 5);
   await page.getByRole("button", { name: /Fake Fist/ }).click();
@@ -651,6 +666,8 @@ test("the optional features step boxes sections in an adaptive grid, highlights 
 
   await expect(grid).toHaveClass(/md:grid-cols-2/);
   await expect(grid).not.toHaveClass(/max-w-xl/);
+  await expect(panel).toHaveClass(/lg:w-96/);
+  await expect(panel).not.toHaveClass(/flex-1/);
 
   // Fake Deep Cut and Fake Trip Attack both consume a "Fake Superiority Die"
   // in this fixture set — a resource cost previously dropped from the UI
@@ -762,7 +779,7 @@ test("the species step groups reprinted species and applies the chosen source va
   await deleteCharacter(page, name);
 });
 
-test("the Species and Background steps show hover/click details in a right-side panel", async ({ page }) => {
+test("the Optional Features, Species, and Background steps show hover/click details in a right-side panel", async ({ page }) => {
   const name = uniqueName("Detail Panel Hero");
   await goto(page, "/characters/new");
 
@@ -770,7 +787,25 @@ test("the Species and Background steps show hover/click details in a right-side 
   await next(page); // basics -> class
   await page.getByRole("button", { name: /Fake Warrior/ }).click();
   await next(page); // class -> optional features
-  await page.getByRole("button", { name: "Fake Weapon Focus" }).click();
+
+  // Optional Features: hovering a checklist option previews it on the
+  // right without toggling it; clicking both toggles the pick and updates
+  // the preview to match.
+  await expect(page.getByText("Hover or select an option to see its details.")).toBeVisible();
+  const weaponFocus = page.getByRole("button", { name: "Fake Weapon Focus" });
+  await weaponFocus.hover();
+  await expect(page.getByRole("heading", { name: "Fake Weapon Focus" })).toBeVisible();
+  await expect(weaponFocus).toHaveAttribute("aria-pressed", "false");
+  await weaponFocus.click();
+  await expect(weaponFocus).toHaveAttribute("aria-pressed", "true");
+
+  // Unlike the single-pick Species/Background lists below, this is a
+  // multi-select checklist — moving the mouse off the list does NOT revert
+  // the preview to a placeholder or the last commit; it just stays wherever
+  // it was last hovered/clicked, matching the Spells step's behavior.
+  await page.getByRole("heading", { name: "Optional Features" }).hover();
+  await expect(page.getByRole("heading", { name: "Fake Weapon Focus" })).toBeVisible();
+
   await next(page); // optional features -> species
 
   // Species: hovering a single-variant species previews its detail card on
@@ -805,6 +840,61 @@ test("the Species and Background steps show hover/click details in a right-side 
   await expect(page.getByRole("heading", { name: /Fake Scholar/ })).toBeVisible();
   await page.getByRole("heading", { name: "Background" }).hover();
   await expect(page.getByRole("heading", { name: /Fake Wanderer/ })).toBeVisible();
+});
+
+test("the Feats & ASIs step shows hover/click feat details only once Feat is chosen", async ({ page }) => {
+  await goto(page, "/characters/new");
+
+  await search(page, "e.g. Brenna Ironquill", "ASI Detail Panel Check");
+  await next(page); // basics -> class
+
+  await page.getByRole("button", { name: /Fake Warrior/ }).click();
+  await setClassLevel(page, /Fake Warrior/, 4);
+  await next(page); // class -> optional features
+  await page.getByRole("button", { name: "Fake Weapon Focus" }).click();
+  await next(page); // optional features -> species
+  await page.getByRole("button", { name: /Fake Skyfolk/ }).click();
+  await next(page); // species -> background
+  await page.getByRole("button", { name: /Fake Wanderer/ }).click();
+  await next(page); // background -> skills
+
+  const skillSlot1 = page.locator("div.rounded-box").filter({ hasText: "Skill choice 1" });
+  await skillSlot1.locator("select").selectOption({ label: "Intimidation" });
+  const skillSlot2 = page.locator("div.rounded-box").filter({ hasText: "Skill choice 2" });
+  await skillSlot2.locator("select").selectOption({ label: "Perception" });
+  await next(page); // skills -> abilities
+  // Fake Warrior alone (Fake Fist isn't in play here) is a non-caster, so
+  // Spells is locked and Next skips straight to Feats & ASIs.
+  await next(page); // abilities -> asi
+
+  const slot = page.locator("div.rounded-box").filter({ hasText: "Level 4 improvement" });
+
+  // No feat list/panel exists until the slot's kind is switched to "Feat" —
+  // this hover-preview UI is deliberately scoped to that one sub-choice.
+  await expect(slot.getByRole("list")).toHaveCount(0);
+  await slot.locator("select").first().selectOption("abilities");
+  await expect(slot.getByRole("list")).toHaveCount(0);
+
+  await slot.locator("select").first().selectOption("feat");
+  const brawlerRow = slot.getByRole("button", { name: "Fake Brawler" });
+  await brawlerRow.hover();
+  await expect(page.getByRole("heading", { name: "Fake Brawler" })).toBeVisible();
+  await expect(brawlerRow).not.toHaveClass(/menu-active/);
+  await brawlerRow.click();
+  await expect(brawlerRow).toHaveClass(/menu-active/);
+
+  // Hovering a different feat swaps the preview without touching the
+  // commit, and leaving the list (hovering the slot's own label, outside
+  // it) reverts the panel to the committed pick — same as Species/Background.
+  const vigilanceRow = slot.getByRole("button", { name: "Fake Vigilance" });
+  await vigilanceRow.hover();
+  await expect(page.getByRole("heading", { name: "Fake Vigilance" })).toBeVisible();
+  await slot.locator("span.font-semibold").hover();
+  await expect(page.getByRole("heading", { name: "Fake Brawler" })).toBeVisible();
+
+  // Switching back to Ability increases hides the feat list/panel entirely.
+  await slot.locator("select").first().selectOption("abilities");
+  await expect(slot.getByRole("list")).toHaveCount(0);
 });
 
 test("a level 10 Fake Paladin gets prepared spells, clamped to the fixture's spell pool", async ({ page }) => {

@@ -1,4 +1,6 @@
 use crate::components::background_detail_card::BackgroundDetailCard;
+use crate::components::feat_detail_card::FeatDetailCard;
+use crate::components::optional_feature_detail_card::OptionalFeatureDetailCard;
 use crate::components::species_detail_card::SpeciesDetailCard;
 use crate::components::spell_detail_card::SpellDetailCard;
 use crate::models::background::{Background, BackgroundQuery};
@@ -13,7 +15,7 @@ use crate::models::character::{
     POINT_BUY_BUDGET, STANDARD_ARRAY,
 };
 use crate::models::class::{ability_label, Class, ClassDetail, Subclass};
-use crate::models::feat::FeatQuery;
+use crate::models::feat::{Feat, FeatQuery};
 use crate::models::optional_feature::{
     is_eligible, prerequisite_label, EligibilityContext, FeatureType, OptionalFeature, OptionalFeatureQuery,
     ResourceCost,
@@ -2775,7 +2777,12 @@ fn asi_step(
                     {indexed_slots
                         .into_iter()
                         .filter(|(_, entry_index, _)| *entry_index == active_entry.index)
-                        .map(|(slot, _, slot_level)| asi_slot(slot, slot_level, asi_choices, feat_list))
+                        .map(|(slot, _, slot_level)| asi_slot(
+                            slot,
+                            slot_level,
+                            asi_choices,
+                            feat_list,
+                        ))
                         .collect_view()}
                 </div>
             }
@@ -2798,6 +2805,7 @@ fn asi_slot(
             }
         });
     };
+    let focused_feat = RwSignal::new(None::<Feat>);
 
     let kind = move || match choice() {
         None => "none",
@@ -2885,68 +2893,134 @@ fn asi_slot(
                         }
                             .into_any()
                     }
-                    Some(AsiChoice::Feat { feat_id }) => {
-                        view! {
-                            <Suspense fallback=move || {
-                                view! { <span class="text-sm">"Loading feats..."</span> }
-                            }>
-                                {move || {
-                                    let current = feat_id.clone();
-                                    feat_list
-                                        .get()
-                                        .map(|result| match result {
-                                            Ok(feats) => {
-                                                view! {
-                                                    <select
-                                                        class="select select-bordered select-sm"
-                                                        on:change=move |ev| {
-                                                            set_choice(
-                                                                Some(AsiChoice::Feat {
-                                                                    feat_id: event_target_value(&ev),
-                                                                }),
-                                                            )
+                    _ => ().into_any(),
+                }}
+            </div>
+            {move || match choice() {
+                Some(AsiChoice::Feat { feat_id }) => {
+                    view! {
+                        <Suspense fallback=move || {
+                            view! { <span class="text-sm">"Loading feats..."</span> }
+                        }>
+                            {move || {
+                                let current = feat_id.clone();
+                                feat_list
+                                    .get()
+                                    .map(|result| match result {
+                                        Ok(feats) => {
+                                            let committed_feat = {
+                                                let current = current.clone();
+                                                let feats = feats.clone();
+                                                move || -> Option<Feat> {
+                                                    feats.iter().find(|f| f.id == current).cloned()
+                                                }
+                                            };
+                                            view! {
+                                                <div class="flex flex-col lg:flex-row gap-3 w-full">
+                                                    <ul
+                                                        class="menu menu-sm bg-base-200 rounded-box max-h-72 overflow-y-auto flex-nowrap flex-1 min-w-0"
+                                                        on:mouseleave=move |_| {
+                                                            focused_feat.set(committed_feat())
                                                         }
                                                     >
-                                                        <option value="" selected=move || current.is_empty()>
-                                                            "Choose a feat..."
-                                                        </option>
                                                         {feats
                                                             .into_iter()
                                                             .map(|feat| {
-                                                                let selected_id = feat.id.clone();
-                                                                let current = feat_id.clone();
-                                                                view! {
-                                                                    <option
-                                                                        value=feat.id.clone()
-                                                                        selected=move || current == selected_id
-                                                                    >
-                                                                        {format!("{} ({})", feat.name, feat.source)}
-                                                                    </option>
-                                                                }
+                                                                asi_feat_row(feat, slot, asi_choices, focused_feat)
                                                             })
                                                             .collect_view()}
-                                                    </select>
-                                                }
-                                                    .into_any()
+                                                    </ul>
+                                                    <div class="flex-1 w-full">
+                                                        {move || match focused_feat.get() {
+                                                            Some(feat) => {
+                                                                view! { <FeatDetailCard feat=feat /> }.into_any()
+                                                            }
+                                                            None => {
+                                                                detail_panel_placeholder(
+                                                                        "Hover or select a feat to see its details.",
+                                                                    )
+                                                                    .into_any()
+                                                            }
+                                                        }}
+                                                    </div>
+                                                </div>
                                             }
-                                            Err(err) => {
-                                                view! {
-                                                    <span class="text-sm text-error">
-                                                        {format!("Failed to load feats: {err}")}
-                                                    </span>
-                                                }
-                                                    .into_any()
+                                                .into_any()
+                                        }
+                                        Err(err) => {
+                                            view! {
+                                                <span class="text-sm text-error">
+                                                    {format!("Failed to load feats: {err}")}
+                                                </span>
                                             }
-                                        })
-                                }}
-                            </Suspense>
-                        }
-                            .into_any()
+                                                .into_any()
+                                        }
+                                    })
+                            }}
+                        </Suspense>
                     }
-                    None => ().into_any(),
-                }}
-            </div>
+                        .into_any()
+                }
+                _ => ().into_any(),
+            }}
         </div>
+    }
+}
+
+// A single feat row inside an ASI slot's "Feat" choice — mirrors
+// `species_row`'s hover-to-preview/click-to-select pattern, but scoped to
+// one slot's own `focused_feat` signal so multiple slots don't fight over
+// which feat is shown.
+fn asi_feat_row(
+    feat: Feat,
+    slot: usize,
+    asi_choices: RwSignal<Vec<Option<AsiChoice>>>,
+    focused_feat: RwSignal<Option<Feat>>,
+) -> impl IntoView {
+    let id = feat.id.clone();
+    let click_id = feat.id.clone();
+    let is_selected = move || {
+        matches!(
+            asi_choices.get().get(slot).cloned().flatten(),
+            Some(AsiChoice::Feat { feat_id }) if feat_id == id
+        )
+    };
+    let label = feat.name.clone();
+    let subtitle = match &feat.prerequisite {
+        Some(prereq) => format!("{} — {}", feat.source, prereq),
+        None => feat.source.clone(),
+    };
+    let hover_feat = feat.clone();
+    let click_feat = feat;
+
+    view! {
+        <li>
+            <button
+                type="button"
+                class=move || {
+                    if is_selected() {
+                        "flex flex-col items-start gap-0 menu-active"
+                    } else {
+                        "flex flex-col items-start gap-0"
+                    }
+                }
+                on:mouseenter=move |_| focused_feat.set(Some(hover_feat.clone()))
+                on:click=move |_| {
+                    focused_feat.set(Some(click_feat.clone()));
+                    asi_choices
+                        .update(|choices| {
+                            if let Some(entry) = choices.get_mut(slot) {
+                                *entry = Some(AsiChoice::Feat {
+                                    feat_id: click_id.clone(),
+                                });
+                            }
+                        });
+                }
+            >
+                <span>{label}</span>
+                <span class="text-xs opacity-70">{subtitle}</span>
+            </button>
+        </li>
     }
 }
 
@@ -3349,6 +3423,7 @@ fn optional_features_step(
     let active_index =
         Memo::new(move |_| features_class_tab.get().min(entries_with_types.get().len().saturating_sub(1)));
     let active_entry = Memo::new(move |_| entries_with_types.get().get(active_index.get()).cloned());
+    let focused_feature = RwSignal::new(None::<OptionalFeature>);
 
     view! {
         <h2 class="card-title">"Optional Features"</h2>
@@ -3398,26 +3473,63 @@ fn optional_features_step(
         {move || {
             let Some(entry) = active_entry.get() else { return ().into_any() };
             let mut types = entry.active_types.clone();
-            types.sort_by_key(|t| {
-                OPTIONAL_FEATURE_DISPLAY_ORDER.iter().position(|other| other == t).unwrap_or(usize::MAX)
-            });
-            let grid_class =
-                if types.len() >= 2 { "grid grid-cols-1 md:grid-cols-2 gap-4" } else { "grid grid-cols-1 gap-4 max-w-xl" };
+            types
+                .sort_by_key(|t| {
+                    OPTIONAL_FEATURE_DISPLAY_ORDER
+                        .iter()
+                        .position(|other| other == t)
+                        .unwrap_or(usize::MAX)
+                });
+            // A single checklist alone in the list column leaves the fixed-width
+            // panel looking stranded in a sea of empty space, so it only grows
+            // to fill the row (list column shrinks to its content's natural
+            // width instead) once there's just one list to show it next to.
+            let (grid_class, list_wrapper_class, panel_wrapper_class) = if types.len() >= 2 {
+                (
+                    "grid grid-cols-1 md:grid-cols-2 gap-4",
+                    "flex-1 w-full",
+                    "w-full lg:w-96 lg:sticky lg:top-4",
+                )
+            } else {
+                (
+                    "grid grid-cols-1 gap-4 max-w-xl",
+                    "w-full lg:w-auto",
+                    "flex-1 w-full lg:sticky lg:top-4",
+                )
+            };
             let class_id = entry.entry.class_id.clone();
             view! {
-                <div class=grid_class>
-                    {types
-                        .into_iter()
-                        .map(|feature_type| {
-                            optional_feature_checklist_section(
-                                class_id.clone(),
-                                feature_type,
-                                optional_feature_pool_all,
-                                feature_slots,
-                                choices,
-                            )
-                        })
-                        .collect_view()}
+                <div class="flex flex-col lg:flex-row gap-4 items-start">
+                    <div class=list_wrapper_class>
+                        <div class=grid_class>
+                            {types
+                                .into_iter()
+                                .map(|feature_type| {
+                                    optional_feature_checklist_section(
+                                        class_id.clone(),
+                                        feature_type,
+                                        optional_feature_pool_all,
+                                        feature_slots,
+                                        choices,
+                                        focused_feature,
+                                    )
+                                })
+                                .collect_view()}
+                        </div>
+                    </div>
+                    <div class=panel_wrapper_class>
+                        {move || match focused_feature.get() {
+                            Some(feature) => {
+                                view! { <OptionalFeatureDetailCard feature=feature /> }.into_any()
+                            }
+                            None => {
+                                detail_panel_placeholder(
+                                        "Hover or select an option to see its details.",
+                                    )
+                                    .into_any()
+                            }
+                        }}
+                    </div>
                 </div>
             }
                 .into_any()
@@ -3442,6 +3554,7 @@ fn optional_feature_checklist_section(
     optional_feature_pool_all: OptionalFeaturePoolResource,
     feature_slots: Memo<Vec<FeatureTypeSlot>>,
     choices: RwSignal<Vec<String>>,
+    focused_feature: RwSignal<Option<OptionalFeature>>,
 ) -> impl IntoView {
     let slot_class_id = class_id.clone();
     let find_slot = move || {
@@ -3463,10 +3576,21 @@ fn optional_feature_checklist_section(
             <h3 class="font-semibold flex items-center gap-2">
                 <span>{feature_type.label()}</span>
                 <span class="badge badge-outline badge-sm font-normal">
-                    {move || format!("{}/{}", chosen_count_for_type(), find_slot().map(|s| s.required).unwrap_or(0))}
+                    {move || {
+                        format!(
+                            "{}/{}",
+                            chosen_count_for_type(),
+                            find_slot().map(|s| s.required).unwrap_or(0),
+                        )
+                    }}
                 </span>
             </h3>
-            {optional_feature_over_quota_banner(class_id.clone(), feature_type, feature_slots, choices)}
+            {optional_feature_over_quota_banner(
+                class_id.clone(),
+                feature_type,
+                feature_slots,
+                choices,
+            )}
             <div class="flex flex-col gap-1 max-h-96 overflow-y-auto pr-1">
                 {move || {
                     optional_feature_pool_for_class(optional_feature_pool_all, &class_id)
@@ -3479,6 +3603,7 @@ fn optional_feature_checklist_section(
                                 feature,
                                 feature_slots,
                                 choices,
+                                focused_feature,
                             )
                         })
                         .collect_view()
@@ -3542,7 +3667,10 @@ fn optional_feature_choice_button(
     feature: OptionalFeature,
     feature_slots: Memo<Vec<FeatureTypeSlot>>,
     choices: RwSignal<Vec<String>>,
+    focused_feature: RwSignal<Option<OptionalFeature>>,
 ) -> impl IntoView {
+    let hover_feature = feature.clone();
+    let click_feature = feature.clone();
     let prerequisite = prerequisite_label(&feature.prerequisites);
     let label = match &prerequisite {
         Some(prerequisite) => format!("{} ({prerequisite})", feature.name),
@@ -3592,7 +3720,10 @@ fn optional_feature_choice_button(
                     "btn btn-sm btn-outline justify-start text-left h-auto py-1.5 flex-col items-start w-full"
                 }
             }
-            class:opacity-50=move || { !find_slot().is_some_and(|slot| slot.eligible_ids.contains(&id_for_dim)) }
+            class:opacity-50=move || {
+                !find_slot().is_some_and(|slot| slot.eligible_ids.contains(&id_for_dim))
+            }
+            on:mouseenter=move |_| focused_feature.set(Some(hover_feature.clone()))
             on:click=move |_| {
                 choices
                     .update(|list| {
@@ -3602,6 +3733,7 @@ fn optional_feature_choice_button(
                             list.push(id_for_toggle.clone());
                         }
                     });
+                focused_feature.set(Some(click_feature.clone()));
             }
         >
             <span>{label}</span>
