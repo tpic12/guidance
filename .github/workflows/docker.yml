@@ -1,0 +1,30 @@
+name: Docker dev image
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile.dev
+      - compose.yaml
+      - .dockerignore
+      - .github/workflows/docker.yml
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile.dev
+      - compose.yaml
+      - .dockerignore
+      - .github/workflows/docker.yml
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Validates compose.yaml and builds Dockerfile.dev — catches the class
+      # of failure that bites weeks later: a pinned binary URL going stale,
+      # the base image dropping a package, etc.
+      - name: Build the dev container image
+        run: docker compose build

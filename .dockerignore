@@ -1,0 +1,9 @@
+target/
+node_modules/
+.pnpm-store/
+end2end/node_modules/
+end2end/test-results/
+end2end/playwright-report/
+.git/
+dev.db*
+e2e.db*

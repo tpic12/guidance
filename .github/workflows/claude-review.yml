@@ -1,0 +1,101 @@
+# Runs Claude Code against a PR in either of two ways:
+#   1. Someone comments "@claude review" on it (top-level PR comment or
+#      inline code-review comment).
+#   2. The CI workflow finishes successfully for it — gated on *every* check
+#      for that commit passing (via `gh pr checks --watch`), not just the
+#      one that happened to trigger this workflow, so a still-running or
+#      failing check (e.g. the path-filtered Docker image build) blocks the
+#      review rather than racing it.
+# Never runs directly off push/pull_request events itself, so it doesn't fire
+# on every commit — only after a "@claude review" ask, or once CI is green.
+# Uses a Claude Pro/Max subscription OAuth token (from `claude setup-token`)
+# rather than metered API billing.
+name: Claude Review
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+jobs:
+  claude-review:
+    if: |
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@claude review')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude review'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read # lets Claude read CI results on the PR
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          trigger_phrase: "@claude review"
+          # A one-shot CI job has no "later" for a delegated background
+          # subagent to resume into, unlike an interactive session — Task
+          # spawns one, the run ends before it reports back, and the review
+          # comment is left half-finished (some files never actually
+          # reviewed) even though the job itself exits successfully.
+          claude_args: |
+            --disallowedTools "Task"
+
+  claude-review-after-ci:
+    if: |
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+      checks: read
+    steps:
+      - name: Wait for all checks to pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr checks "${{ github.event.workflow_run.pull_requests[0].number }}" \
+            --repo "${{ github.repository }}" \
+            --watch \
+            --fail-fast
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+
+            All CI checks just passed for this pull request. Please review it.
+
+            Note: The PR branch is already checked out in the current working directory.
+
+            Use `gh pr comment` for top-level feedback.
+            Use `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) to highlight specific code issues.
+            Only post GitHub comments - don't submit review text as messages.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
