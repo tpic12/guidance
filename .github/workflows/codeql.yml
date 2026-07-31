@@ -25,22 +25,15 @@ jobs:
           df -h /
 
       - uses: dtolnay/rust-toolchain@nightly
-        with:
-          targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
 
+      # The Rust extractor only supports build-mode "none" — it analyzes
+      # source directly rather than needing an actual compile.
       - uses: github/codeql-action/init@v3
         with:
           languages: rust
-          build-mode: manual
-
-      # Autobuild can't infer the right feature set for a Leptos crate split
-      # across ssr/hydrate; build both targets explicitly, as CI does.
-      - name: Build
-        run: |
-          cargo build --features ssr --bin guidance
-          cargo build --lib --no-default-features --features hydrate --target wasm32-unknown-unknown
+          build-mode: none
 
       - uses: github/codeql-action/analyze@v3
         with:

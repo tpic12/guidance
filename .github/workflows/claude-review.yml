@@ -1,11 +1,12 @@
 # Runs Claude Code against a PR in either of two ways:
 #   1. Someone comments "@claude review" on it (top-level PR comment or
 #      inline code-review comment).
-#   2. The CI workflow finishes successfully for it — gated on *every* check
-#      for that commit passing (via `gh pr checks --watch`), not just the
-#      one that happened to trigger this workflow, so a still-running or
-#      failing check (e.g. the path-filtered Docker image build) blocks the
-#      review rather than racing it.
+#   2. The CI workflow finishes successfully for it — gated on every
+#      branch-protection-required check for that commit passing (via
+#      `gh pr checks --watch --required`), not just the one that happened to
+#      trigger this workflow, so a still-running or failing required check
+#      blocks the review rather than racing it. Non-required checks (Docker
+#      image build, cargo-audit, CodeQL) don't gate this.
 # Never runs directly off push/pull_request events itself, so it doesn't fire
 # on every commit — only after a "@claude review" ask, or once CI is green.
 # Uses a Claude Pro/Max subscription OAuth token (from `claude setup-token`)
@@ -67,14 +68,18 @@ jobs:
       actions: read
       checks: read
     steps:
-      - name: Wait for all checks to pass
+      # Only gates on branch-protection-required checks (build, unit-tests,
+      # end-to-end) — advisory scans like cargo-audit/CodeQL shouldn't block
+      # the review from ever running.
+      - name: Wait for required checks to pass
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh pr checks "${{ github.event.workflow_run.pull_requests[0].number }}" \
             --repo "${{ github.repository }}" \
             --watch \
-            --fail-fast
+            --fail-fast \
+            --required
 
       - name: Checkout PR head
         uses: actions/checkout@v4
