@@ -2,6 +2,7 @@ use super::*;
 use crate::importer::parse_class::parse_class_file;
 use crate::models::optional_feature::FeatureType;
 use crate::models::skill::SkillGrant;
+use crate::models::spell::School;
 use serde_json::json;
 
 #[test]
@@ -86,7 +87,7 @@ fn class_and_subclass_progressions_of_the_same_type_are_kept_separate_for_later_
     assert_eq!(class.optional_feature_progressions[0].feature_type, FeatureType::EldritchInvocation);
     assert_eq!(class.optional_feature_progressions[0].known, vec![0, 2, 2, 3]);
 
-    let (subclass, _features, _grants) = &bundles[0].subclasses[0];
+    let (subclass, _features, _grants, _choices) = &bundles[0].subclasses[0];
     assert_eq!(subclass.optional_feature_progressions.len(), 1);
     assert_eq!(subclass.optional_feature_progressions[0].feature_type, FeatureType::EldritchInvocation);
     // Sparse {"10": 1}, forward-filled: 0 until level 10, then 1.
@@ -202,7 +203,7 @@ fn subclass_granted_spellcasting_fields_flow_through_and_normalize() {
     let file = parse_class_file(raw).unwrap();
     let bundles = class_bundles_from_parsed(file).unwrap();
     assert_eq!(bundles.len(), 1);
-    let (subclass, _features, _grants) = &bundles[0].subclasses[0];
+    let (subclass, _features, _grants, _choices) = &bundles[0].subclasses[0];
 
     assert_eq!(subclass.caster_progression, Some("third".to_string()));
     assert_eq!(subclass.spellcasting_ability, Some("int".to_string()));
@@ -383,7 +384,7 @@ fn additional_spells_prepared_and_known_become_granted_refs() {
     }]));
 
     let bundles = class_bundles_from_parsed(parse_class_file(&raw).unwrap()).unwrap();
-    let (subclass, _features, grants) = &bundles[0].subclasses[0];
+    let (subclass, _features, grants, _choices) = &bundles[0].subclasses[0];
 
     // Common (ungrouped) shape: no fan-out, exactly one subclass produced.
     assert_eq!(bundles[0].subclasses.len(), 1);
@@ -409,7 +410,7 @@ fn additional_spells_strips_hash_and_pipe_suffixes() {
     }]));
 
     let bundles = class_bundles_from_parsed(parse_class_file(&raw).unwrap()).unwrap();
-    let (_subclass, _features, grants) = &bundles[0].subclasses[0];
+    let (_subclass, _features, grants, _choices) = &bundles[0].subclasses[0];
     let names: std::collections::HashSet<&str> =
         grants.iter().map(|g| g.spell_name_lower.as_str()).collect();
     assert!(names.contains("fire shield"));
@@ -418,31 +419,124 @@ fn additional_spells_strips_hash_and_pipe_suffixes() {
 }
 
 #[test]
-fn additional_spells_skips_choose_filters_and_daily_wrappers() {
-    // Nature domain's bonus cantrip is a `{"choose": ...}` filter (dynamic
-    // pick, not a fixed grant); Fathomless's "known" entry is a `{"daily":
-    // ...}` wrapper (once-per-day, not an always-active spell). Neither
-    // should produce a GrantedSpellRef, but the sibling fixed `prepared`
-    // entries in the same block still should.
+fn additional_spells_nature_domain_choose_filter_becomes_a_choice_grant() {
+    // Nature Domain's bonus cantrip (`fixtures/classes/cleric.json`): a
+    // `{"_": [{"choose": "level=0|class=Druid"}]}` wrapper, not a bare
+    // array — the sibling fixed `prepared` entry in the same block should
+    // still produce its own `GrantedSpellRef`.
     let raw = cleric_shaped_file(json!([{
-        "known": {"1": {"_": [{"choose": "level=0|class=Druid"}]}, "10": {"daily": {"1": ["evard's black tentacles"]}}},
+        "known": {"1": {"_": [{"choose": "level=0|class=Druid"}]}},
         "prepared": {"1": ["animal friendship"]}
     }]));
 
     let bundles = class_bundles_from_parsed(parse_class_file(&raw).unwrap()).unwrap();
-    let (_subclass, _features, grants) = &bundles[0].subclasses[0];
+    let (_subclass, _features, grants, choices) = &bundles[0].subclasses[0];
     assert_eq!(
         grants,
         &vec![GrantedSpellRef { spell_name_lower: "animal friendship".to_string(), level: 1 }]
     );
+    assert_eq!(
+        choices,
+        &vec![(
+            1,
+            SpellChoiceGrant { spell_level: 0, class_name: Some("Druid".to_string()), school: None, count: 1 }
+        )]
+    );
+}
+
+#[test]
+fn additional_spells_death_domain_school_filter_with_count() {
+    // Death Domain's bonus cantrip: `school=N` (Necromancy) with an
+    // explicit sibling `"count"` key.
+    let raw = cleric_shaped_file(json!([{
+        "known": {"1": {"_": [{"choose": "level=0|school=N", "count": 1}]}}
+    }]));
+
+    let bundles = class_bundles_from_parsed(parse_class_file(&raw).unwrap()).unwrap();
+    let (_subclass, _features, _grants, choices) = &bundles[0].subclasses[0];
+    assert_eq!(
+        choices,
+        &vec![(
+            1,
+            SpellChoiceGrant { spell_level: 0, class_name: None, school: Some(School::Necromancy), count: 1 }
+        )]
+    );
+}
+
+#[test]
+fn additional_spells_arcana_domain_count_two_filter() {
+    let raw = cleric_shaped_file(json!([{
+        "known": {"1": {"_": [{"choose": "level=0|class=Wizard", "count": 2}]}}
+    }]));
+
+    let bundles = class_bundles_from_parsed(parse_class_file(&raw).unwrap()).unwrap();
+    let (_subclass, _features, _grants, choices) = &bundles[0].subclasses[0];
+    assert_eq!(
+        choices,
+        &vec![(
+            1,
+            SpellChoiceGrant { spell_level: 0, class_name: Some("Wizard".to_string()), school: None, count: 2 }
+        )]
+    );
+}
+
+#[test]
+fn additional_spells_arcana_domain_bare_array_of_choose_objects() {
+    // Arcana Domain's 17th-level feature: a *bare array* (no `"_"` wrapper)
+    // whose elements are `{"choose": ...}` objects, not strings — four
+    // separate single-spell filters.
+    let raw = cleric_shaped_file(json!([{
+        "prepared": {"17": [
+            {"choose": "level=6|class=Wizard"},
+            {"choose": "level=7|class=Wizard"},
+            {"choose": "level=8|class=Wizard"},
+            {"choose": "level=9|class=Wizard"}
+        ]}
+    }]));
+
+    let bundles = class_bundles_from_parsed(parse_class_file(&raw).unwrap()).unwrap();
+    let (_subclass, _features, grants, choices) = &bundles[0].subclasses[0];
+    assert!(grants.is_empty());
+    let levels: Vec<u8> = choices.iter().map(|(_, grant)| grant.spell_level).collect();
+    assert_eq!(levels, vec![6, 7, 8, 9]);
+    assert!(choices.iter().all(|(grant_level, grant)| {
+        *grant_level == 17 && grant.class_name.as_deref() == Some("Wizard") && grant.count == 1
+    }));
+}
+
+#[test]
+fn additional_spells_skips_daily_wrappers_and_bard_open_ended_shapes() {
+    // Fathomless's "known" entry is a `{"daily": ...}` wrapper (once-per-day,
+    // not an always-active spell, out of scope per Vikunja #57). Bard
+    // Magical Secrets' semicolon multi-level list and empty-string "any
+    // spell" shapes are a materially different open-ended picker, also
+    // deferred — both must be skipped without producing a grant or
+    // panicking, while the sibling fixed `prepared` entry still works.
+    let raw = cleric_shaped_file(json!([{
+        "known": {
+            "10": {"daily": {"1": ["evard's black tentacles"]}},
+            "14": [{"choose": "level=0;1;2;3;4;5"}],
+            "18": [{"choose": ""}]
+        },
+        "prepared": {"1": ["animal friendship"]}
+    }]));
+
+    let bundles = class_bundles_from_parsed(parse_class_file(&raw).unwrap()).unwrap();
+    let (_subclass, _features, grants, choices) = &bundles[0].subclasses[0];
+    assert_eq!(
+        grants,
+        &vec![GrantedSpellRef { spell_name_lower: "animal friendship".to_string(), level: 1 }]
+    );
+    assert!(choices.is_empty());
 }
 
 #[test]
 fn additional_spells_with_no_block_produces_no_grants() {
     let raw = cleric_shaped_file(json!([]));
     let bundles = class_bundles_from_parsed(parse_class_file(&raw).unwrap()).unwrap();
-    let (_subclass, _features, grants) = &bundles[0].subclasses[0];
+    let (_subclass, _features, grants, choices) = &bundles[0].subclasses[0];
     assert!(grants.is_empty());
+    assert!(choices.is_empty());
 }
 
 #[test]
@@ -460,7 +554,7 @@ fn named_additional_spells_variants_fan_out_into_separate_subclasses() {
     assert_eq!(subclasses.len(), 2);
 
     let mut by_name: std::collections::HashMap<&str, &Vec<GrantedSpellRef>> = std::collections::HashMap::new();
-    for (subclass, _features, grants) in subclasses {
+    for (subclass, _features, grants, _choices) in subclasses {
         by_name.insert(subclass.name.as_str(), grants);
     }
 
@@ -477,7 +571,7 @@ fn named_additional_spells_variants_fan_out_into_separate_subclasses() {
 
     // Each fanned variant gets its own slugified id (distinct short_name).
     let ids: std::collections::HashSet<&str> =
-        subclasses.iter().map(|(s, _, _)| s.id.as_str()).collect();
+        subclasses.iter().map(|(s, _, _, _)| s.id.as_str()).collect();
     assert_eq!(ids.len(), 2);
 }
 
@@ -491,7 +585,7 @@ fn named_variants_inherit_any_ungrouped_common_grants() {
     let bundles = class_bundles_from_parsed(parse_class_file(&raw).unwrap()).unwrap();
     let subclasses = &bundles[0].subclasses;
     assert_eq!(subclasses.len(), 1);
-    let (subclass, _features, grants) = &subclasses[0];
+    let (subclass, _features, grants, _choices) = &subclasses[0];
     assert_eq!(subclass.name, "Life Domain (Arctic)");
     let mut sorted = grants.clone();
     sorted.sort_by_key(|g| g.level);
@@ -501,5 +595,32 @@ fn named_variants_inherit_any_ungrouped_common_grants() {
             GrantedSpellRef { spell_name_lower: "bless".to_string(), level: 1 },
             GrantedSpellRef { spell_name_lower: "hold person".to_string(), level: 3 },
         ]
+    );
+}
+
+#[test]
+fn parse_choose_filter_rejects_semicolon_level_lists_and_empty_strings() {
+    // Bard Magical Secrets' shapes — a materially different "any spell"
+    // picker, deferred (see Vikunja #57).
+    assert_eq!(parse_choose_filter("level=0;1;2;3;4;5", 1), None);
+    assert_eq!(parse_choose_filter("", 1), None);
+}
+
+#[test]
+fn parse_choose_filter_rejects_missing_or_unparseable_level() {
+    assert_eq!(parse_choose_filter("class=Wizard", 1), None);
+    assert_eq!(parse_choose_filter("level=abc|class=Wizard", 1), None);
+}
+
+#[test]
+fn parse_choose_filter_rejects_unknown_school_code() {
+    assert_eq!(parse_choose_filter("level=0|school=Z", 1), None);
+}
+
+#[test]
+fn parse_choose_filter_defaults_count_and_parses_class_only() {
+    assert_eq!(
+        parse_choose_filter("level=2|class=Druid", 1),
+        Some(SpellChoiceGrant { spell_level: 2, class_name: Some("Druid".to_string()), school: None, count: 1 })
     );
 }

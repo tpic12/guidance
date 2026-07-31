@@ -212,6 +212,71 @@ pub async fn get_subclass_granted_spells(
         .collect()
 }
 
+/// Spell choice-pools a subclass's `{"choose": ...}` grants (Cleric Nature/
+/// Death/Arcana Domain's free cantrip/spell picks — see `SpellChoiceGrant` in
+/// `src/importer/transform_class.rs`) unlock at or below `level`. One
+/// `(count, Vec<Spell>)` per still-active filter row, not merged across rows,
+/// so a subclass with several independent filters (e.g. Arcana Domain's
+/// 17th-level feature grants four separate single-spell picks) surfaces as
+/// four separate labelled slot-groups rather than one conflated pool.
+pub async fn get_subclass_spell_choice_pools(
+    pool: &SqlitePool,
+    subclass_id: &str,
+    level: u8,
+) -> anyhow::Result<Vec<(u8, Vec<Spell>)>> {
+    let rows = sqlx::query(
+        "SELECT spell_level, class_name, school, count FROM subclass_spell_choice_grants \
+         WHERE subclass_id = ? AND grant_level <= ?",
+    )
+    .bind(subclass_id)
+    .bind(level as i64)
+    .fetch_all(pool)
+    .await
+    .context("failed to query subclass spell choice grants")?;
+
+    let mut pools = Vec::with_capacity(rows.len());
+    for row in rows {
+        let spell_level: i64 = row.try_get("spell_level").context("missing spell_level column")?;
+        let class_name: Option<String> = row.try_get("class_name").context("missing class_name column")?;
+        let school: Option<String> = row.try_get("school").context("missing school column")?;
+        let count: i64 = row.try_get("count").context("missing count column")?;
+
+        let sql = match (&class_name, &school) {
+            (Some(_), Some(_)) => {
+                "SELECT s.data_json FROM spells s \
+                 JOIN class_spells cs ON cs.spell_id = s.id \
+                 JOIN classes c ON c.id = cs.class_id \
+                 WHERE s.level = ? AND c.name = ? AND s.school = ? ORDER BY s.name"
+            }
+            (Some(_), None) => {
+                "SELECT s.data_json FROM spells s \
+                 JOIN class_spells cs ON cs.spell_id = s.id \
+                 JOIN classes c ON c.id = cs.class_id \
+                 WHERE s.level = ? AND c.name = ? ORDER BY s.name"
+            }
+            (None, Some(_)) => "SELECT s.data_json FROM spells s WHERE s.level = ? AND s.school = ? ORDER BY s.name",
+            (None, None) => "SELECT s.data_json FROM spells s WHERE s.level = ? ORDER BY s.name",
+        };
+        let mut query = sqlx::query(sql).bind(spell_level);
+        if let Some(class_name) = &class_name {
+            query = query.bind(class_name);
+        }
+        if let Some(school) = &school {
+            query = query.bind(school);
+        }
+        let spell_rows = query.fetch_all(pool).await.context("failed to query subclass spell choice pool")?;
+        let spells = spell_rows
+            .into_iter()
+            .map(|row| {
+                let data_json: String = row.try_get("data_json").context("missing data_json column")?;
+                serde_json::from_str::<Spell>(&data_json).context("failed to deserialize spell row")
+            })
+            .collect::<anyhow::Result<Vec<Spell>>>()?;
+        pools.push((count as u8, spells));
+    }
+    Ok(pools)
+}
+
 /// Resolves spell ids back into full `Spell` records, tolerating ids that no
 /// longer exist (e.g. a spell removed after a character already picked it) —
 /// same tolerate-dangling policy as the rest of character sheet resolution.
@@ -930,8 +995,15 @@ pub async fn get_character_sheet(
         }
     }
 
-    let cantrips = get_spells_by_ids(pool, &character.cantrip_choices).await?;
-    let spells = get_spells_by_ids(pool, &character.spell_choices).await?;
+    let mut cantrips = get_spells_by_ids(pool, &character.cantrip_choices).await?;
+    let mut spells = get_spells_by_ids(pool, &character.spell_choices).await?;
+    // Subclass `{"choose": ...}` grant picks (e.g. Cleric Nature Domain's
+    // free Druid cantrip — see Vikunja #57) are known/prepared the same as
+    // any other cantrip/spell once chosen, just from a different pool —
+    // fold them in here rather than adding a separate sheet section.
+    for spell in get_spells_by_ids(pool, &character.spell_grant_choices).await? {
+        if spell.level == 0 { cantrips.push(spell) } else { spells.push(spell) }
+    }
 
     // Every entry's own active subclass (per that class's own level), not
     // just the first class — a purged/archived class simply isn't in

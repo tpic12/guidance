@@ -4,17 +4,18 @@ use crate::importer::parse_class::{
     RawOptionalFeatureProgressionShape, RawStartingEquipment, RawStartingProficiencies, RawSubclass,
     RawTableGroup,
 };
-use crate::importer::transform::slugify;
+use crate::importer::transform::{school_from_code, slugify};
 use crate::models::class::{Class, ClassFeature, ClassTableGroup, OptionalFeatureProgression, Proficiencies, Subclass};
 use crate::models::optional_feature::FeatureType;
 use crate::models::skill::SkillGrant;
+use crate::models::spell::School;
 use serde_json::Value;
 
 /// A class plus everything imported alongside it, ready to insert.
 pub struct ClassBundle {
     pub class: Class,
     pub features: Vec<ClassFeature>,
-    pub subclasses: Vec<(Subclass, Vec<ClassFeature>, Vec<GrantedSpellRef>)>,
+    pub subclasses: Vec<(Subclass, Vec<ClassFeature>, Vec<GrantedSpellRef>, Vec<(u8, SpellChoiceGrant)>)>,
 }
 
 /// One resolvable "this subclass auto-grants this spell at this level" grant,
@@ -26,35 +27,122 @@ pub struct GrantedSpellRef {
     pub level: u8,
 }
 
-/// Extracts spell names from one level's `additionalSpells` value. Only a
-/// flat JSON array of strings is a fixed grant; anything else (a
-/// `{"choose": ...}` filter object, or the `{"daily": {...}}` wrapper seen on
-/// a couple of Warlock patrons) is skipped — neither has a wizard-side choice
-/// UI yet, tracked as a known gap in TDD.md's Phase 6 notes rather than left
-/// only here. Names sometimes carry a `#c`/`|SOURCE` tag suffix
-/// (`"light#c"`, `"fire shield|"`) that isn't part of the spell's actual name.
-fn granted_spell_names_at_level(value: &Value) -> Vec<String> {
-    let Some(items) = value.as_array() else { return Vec::new() };
-    items
-        .iter()
-        .filter_map(Value::as_str)
-        .filter_map(|name| {
-            let clean = name.split(['#', '|']).next().unwrap_or(name).trim();
-            (!clean.is_empty()).then(|| clean.to_lowercase())
-        })
-        .collect()
+/// One "pick `count` spells matching this filter" grant from a
+/// `{"choose": "level=N|class=X"}` / `{"choose": "level=N|school=X", "count":
+/// N}` additionalSpells entry (Cleric Nature/Death/Arcana Domain's free
+/// cantrip/spell picks) — resolved into an actual pool at wizard time, not
+/// here. The `u8` grant level this is paired with elsewhere is the
+/// *character* level that unlocks the pick; `spell_level` here is the
+/// filter's own `level=N` (the picked spell's level). Only the single-level
+/// `class=`/`school=` shape is modeled; Bard Magical Secrets' semicolon
+/// multi-level list and empty-string "any spell" shapes are a materially
+/// different open-ended picker and are left unparsed (see
+/// `parse_choose_filter`), tracked as a follow-up rather than handled here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpellChoiceGrant {
+    pub spell_level: u8,
+    pub class_name: Option<String>,
+    pub school: Option<School>,
+    pub count: u8,
 }
 
-fn granted_spells_from_entry(entry: &RawAdditionalSpells) -> Vec<GrantedSpellRef> {
-    let mut grants = Vec::new();
+/// Normalizes one level's `additionalSpells` value into an iterable of
+/// candidate entries: either a bare JSON array, or `{"_": [...]}` (the shape
+/// 5etools uses when a level's grants need per-entry `"choose"` filters
+/// rather than a flat spell-name list, e.g. Cleric Nature Domain). Any other
+/// shape (the `{"daily": {...}}` wrapper) yields nothing.
+fn spell_entries_at_level(value: &Value) -> Vec<&Value> {
+    if let Some(items) = value.as_array() {
+        return items.iter().collect();
+    }
+    if let Some(items) = value.get("_").and_then(Value::as_array) {
+        return items.iter().collect();
+    }
+    Vec::new()
+}
+
+/// Parses a `{"choose": "level=N|class=X"}`/`{"choose": "level=N|school=X"}`
+/// filter string into a `SpellChoiceGrant`. Returns `None` (tolerated, not an
+/// error) for shapes this doesn't model: a semicolon-separated multi-level
+/// list or an empty string (both seen on Bard Magical Secrets, a materially
+/// different "any spell" picker), a missing/unparseable `level`, or an
+/// unrecognized `school` letter code.
+fn parse_choose_filter(choose: &str, count: u8) -> Option<SpellChoiceGrant> {
+    if choose.is_empty() {
+        return None;
+    }
+    let mut spell_level = None;
+    let mut class_name = None;
+    let mut school = None;
+    for pair in choose.split('|') {
+        let (key, value) = pair.split_once('=')?;
+        match key {
+            "level" => {
+                if value.contains(';') {
+                    return None;
+                }
+                spell_level = Some(value.parse::<u8>().ok()?);
+            }
+            "class" => class_name = Some(value.to_string()),
+            "school" => school = Some(school_from_code(value).ok()?),
+            _ => {}
+        }
+    }
+    Some(SpellChoiceGrant { spell_level: spell_level?, class_name, school, count })
+}
+
+/// Extracts one `additionalSpells` level entry's spells: a flat JSON array of
+/// strings is a fixed grant (names sometimes carry a `#c`/`|SOURCE` tag
+/// suffix — `"light#c"`, `"fire shield|"` — that isn't part of the spell's
+/// actual name); a `{"choose": ...}` object is a dynamic pick, resolved via
+/// `parse_choose_filter`. Anything else (unparseable choose shapes, the
+/// `{"daily": {...}}` once-per-day wrapper) is skipped — daily grants have no
+/// wizard-side representation yet, tracked as a known gap in TDD.md's Phase 6
+/// notes rather than left only here.
+fn spell_grants_at_level(value: &Value) -> (Vec<String>, Vec<SpellChoiceGrant>) {
+    let mut fixed = Vec::new();
+    let mut choices = Vec::new();
+    for entry in spell_entries_at_level(value) {
+        match entry {
+            Value::String(name) => {
+                let clean = name.split(['#', '|']).next().unwrap_or(name).trim();
+                if !clean.is_empty() {
+                    fixed.push(clean.to_lowercase());
+                }
+            }
+            Value::Object(obj) => {
+                if let Some(choose) = obj.get("choose").and_then(Value::as_str) {
+                    let count = obj.get("count").and_then(Value::as_u64).unwrap_or(1) as u8;
+                    if let Some(grant) = parse_choose_filter(choose, count) {
+                        choices.push(grant);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (fixed, choices)
+}
+
+/// One `additionalSpells` entry's grants, split into always-active fixed
+/// grants and dynamic-pick choice grants (each choice grant paired with the
+/// character level that unlocks it).
+#[derive(Debug, Default)]
+struct EntrySpellGrants {
+    fixed: Vec<GrantedSpellRef>,
+    choices: Vec<(u8, SpellChoiceGrant)>,
+}
+
+fn spell_grants_from_entry(entry: &RawAdditionalSpells) -> EntrySpellGrants {
+    let mut grants = EntrySpellGrants::default();
     for level_map in [&entry.prepared, &entry.known] {
         for (level_str, value) in level_map {
             let Ok(level) = level_str.parse::<u8>() else { continue };
-            grants.extend(
-                granted_spell_names_at_level(value)
-                    .into_iter()
-                    .map(|spell_name_lower| GrantedSpellRef { spell_name_lower, level }),
-            );
+            let (fixed, choices) = spell_grants_at_level(value);
+            grants
+                .fixed
+                .extend(fixed.into_iter().map(|spell_name_lower| GrantedSpellRef { spell_name_lower, level }));
+            grants.choices.extend(choices.into_iter().map(|grant| (level, grant)));
         }
     }
     grants
@@ -66,13 +154,18 @@ fn granted_spells_from_entry(entry: &RawAdditionalSpells) -> Vec<GrantedSpellRef
 /// *named* groups (one per terrain); `class_bundles_from_parsed` fans those
 /// out into separate `Subclass` rows rather than modeling a player-facing
 /// sub-choice.
-fn granted_spell_groups(raw: &RawSubclass) -> Vec<(Option<String>, Vec<GrantedSpellRef>)> {
-    let mut groups: Vec<(Option<String>, Vec<GrantedSpellRef>)> = Vec::new();
+fn granted_spell_groups(
+    raw: &RawSubclass,
+) -> Vec<(Option<String>, Vec<GrantedSpellRef>, Vec<(u8, SpellChoiceGrant)>)> {
+    let mut groups: Vec<(Option<String>, Vec<GrantedSpellRef>, Vec<(u8, SpellChoiceGrant)>)> = Vec::new();
     for entry in &raw.additional_spells {
-        let grants = granted_spells_from_entry(entry);
-        match groups.iter_mut().find(|(name, _)| *name == entry.name) {
-            Some((_, existing)) => existing.extend(grants),
-            None => groups.push((entry.name.clone(), grants)),
+        let grants = spell_grants_from_entry(entry);
+        match groups.iter_mut().find(|(name, _, _)| *name == entry.name) {
+            Some((_, fixed, choices)) => {
+                fixed.extend(grants.fixed);
+                choices.extend(grants.choices);
+            }
+            None => groups.push((entry.name.clone(), grants.fixed, grants.choices)),
         }
     }
     groups
@@ -115,10 +208,11 @@ pub fn class_bundles_from_parsed(file: RawClassFile) -> anyhow::Result<Vec<Class
                         .collect();
 
                     let groups = granted_spell_groups(s);
-                    let has_named_variant = groups.iter().any(|(name, _)| name.is_some());
+                    let has_named_variant = groups.iter().any(|(name, _, _)| name.is_some());
 
                     if !has_named_variant {
-                        let grants = groups.into_iter().next().map(|(_, g)| g).unwrap_or_default();
+                        let (grants, choices) =
+                            groups.into_iter().next().map(|(_, g, c)| (g, c)).unwrap_or_default();
                         let subclass = Subclass {
                             id: slugify(&format!("{} {} {}", raw.name, s.short_name, s.source)),
                             class_id: slugify(&raw.name),
@@ -133,24 +227,26 @@ pub fn class_bundles_from_parsed(file: RawClassFile) -> anyhow::Result<Vec<Class
                                 &s.optional_feature_progression,
                             ),
                         };
-                        vec![(subclass, features, grants)]
+                        vec![(subclass, features, grants, choices)]
                     } else {
                         // Circle-of-the-Land shape: fan out into one Subclass
                         // per named variant, sharing `features` (the terrain
                         // doesn't change class features, only spell grants),
                         // each carrying any ungrouped/common grants plus its
                         // own variant's grants.
-                        let common: Vec<GrantedSpellRef> = groups
+                        let (common, common_choices): (Vec<GrantedSpellRef>, Vec<(u8, SpellChoiceGrant)>) = groups
                             .iter()
-                            .find(|(name, _)| name.is_none())
-                            .map(|(_, g)| g.clone())
+                            .find(|(name, _, _)| name.is_none())
+                            .map(|(_, g, c)| (g.clone(), c.clone()))
                             .unwrap_or_default();
                         groups
                             .into_iter()
-                            .filter_map(|(name, grants)| name.map(|name| (name, grants)))
-                            .map(|(variant_name, grants)| {
+                            .filter_map(|(name, grants, choices)| name.map(|name| (name, grants, choices)))
+                            .map(|(variant_name, grants, choices)| {
                                 let mut all_grants = common.clone();
                                 all_grants.extend(grants);
+                                let mut all_choices = common_choices.clone();
+                                all_choices.extend(choices);
                                 let subclass = Subclass {
                                     id: slugify(&format!(
                                         "{} {} ({}) {}",
@@ -170,7 +266,7 @@ pub fn class_bundles_from_parsed(file: RawClassFile) -> anyhow::Result<Vec<Class
                                         &s.optional_feature_progression,
                                     ),
                                 };
-                                (subclass, features.clone(), all_grants)
+                                (subclass, features.clone(), all_grants, all_choices)
                             })
                             .collect()
                     }

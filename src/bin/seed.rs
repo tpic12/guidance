@@ -257,7 +257,7 @@ async fn seed_classes(pool: &SqlitePool, fixtures_dir: &str) -> anyhow::Result<(
                     .execute(pool).await?;
             }
 
-            for (subclass, features, grants) in &bundle.subclasses {
+            for (subclass, features, grants, choice_grants) in &bundle.subclasses {
                 sqlx::query("INSERT INTO subclasses (id, class_id, name, short_name, source, data_json) VALUES (?,?,?,?,?,?)")
                     .bind(&subclass.id).bind(&subclass.class_id).bind(&subclass.name)
                     .bind(&subclass.short_name).bind(&subclass.source)
@@ -288,6 +288,20 @@ async fn seed_classes(pool: &SqlitePool, fixtures_dir: &str) -> anyhow::Result<(
                         }
                         None => granted_skipped += 1,
                     }
+                }
+
+                for (grant_level, choice) in choice_grants {
+                    sqlx::query(
+                        "INSERT INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
+                    )
+                    .bind(&subclass.id)
+                    .bind(grant_level)
+                    .bind(choice.spell_level)
+                    .bind(&choice.class_name)
+                    .bind(choice.school.map(|s| s.as_str()))
+                    .bind(choice.count)
+                    .execute(pool)
+                    .await?;
                 }
             }
         }
