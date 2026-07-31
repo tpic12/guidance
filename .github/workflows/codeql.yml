@@ -1,0 +1,47 @@
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Catch newly-published query patterns against code that didn't change.
+    - cron: "0 6 * * 3"
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          build-mode: manual
+
+      # Autobuild can't infer the right feature set for a Leptos crate split
+      # across ssr/hydrate; build both targets explicitly, as CI does.
+      - name: Build
+        run: |
+          cargo build --features ssr --bin guidance
+          cargo build --lib --no-default-features --features hydrate --target wasm32-unknown-unknown
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"
