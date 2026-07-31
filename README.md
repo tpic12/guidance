@@ -71,6 +71,13 @@ docker compose exec app sh -c "SEED_RESET=1 cargo run --features ssr --bin seed"
 
 `dev.db` is bind-mounted at the repo root — inspectable with `sqlite3 dev.db`. Other commands: `docker compose logs -f app` (or `just docker-logs`), `docker compose exec app sh` (or `just docker-shell`), `docker compose down` (or `just docker-down`).
 
+Running end-to-end tests against the dev container needs `docker compose run`, not `exec` — `exec` reuses the already-running `app` container, which is already bound to port 3000 serving `dev.db`, so Playwright ends up hitting that instead of a fresh server against `e2e.db`:
+
+```bash
+docker compose run --rm --no-deps app sh -c "FIXTURES_DIR=test-fixtures DATABASE_URL=sqlite://e2e.db SEED_RESET=1 cargo run --features ssr --bin seed"  # or: just docker-seed-e2e
+docker compose run --rm --no-deps app sh -c "DATABASE_URL=sqlite://e2e.db cargo leptos end-to-end"                                                     # or: just docker-e2e
+```
+
 ## Checking your work
 
 ```bash
