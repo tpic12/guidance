@@ -81,3 +81,11 @@ docker-seed:
 # Wipe dev.db's tables and reseed from fixtures/ inside the dev container
 docker-seed-reset:
     docker compose exec app sh -c "SEED_RESET=1 cargo run --features ssr --bin seed"
+
+# Seed e2e.db from test-fixtures/ inside a one-off container (run before docker-e2e)
+docker-seed-e2e:
+    docker compose run --rm --no-deps app sh -c "FIXTURES_DIR=test-fixtures DATABASE_URL=sqlite://e2e.db SEED_RESET=1 cargo run --features ssr --bin seed"
+
+# Run the Playwright end-to-end suite in a one-off container against e2e.db
+docker-e2e:
+    docker compose run --rm --no-deps app sh -c "DATABASE_URL=sqlite://e2e.db cargo leptos end-to-end"
