@@ -1,0 +1,27 @@
+name: guidance
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /app
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    environment:
+      LEPTOS_SITE_ADDR: 0.0.0.0:3000
+      DATABASE_URL: sqlite://dev.db
+    command: sh -c "pnpm install && cargo leptos watch"
+    volumes:
+      - .:/app
+      - cargo-registry:/usr/local/cargo/registry
+      - target-cache:/app/target
+      - node-modules:/app/node_modules
+      - playwright-cache:/root/.cache/ms-playwright
+
+volumes:
+  cargo-registry:
+  target-cache:
+  node-modules:
+  playwright-cache:

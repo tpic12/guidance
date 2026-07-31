@@ -1,0 +1,106 @@
+{
+  "spell": [
+    {
+      "name": "Fake Bolt",
+      "source": "TBK",
+      "level": 0,
+      "school": "V",
+      "time": [{ "number": 1, "unit": "action" }],
+      "range": { "type": "point", "distance": { "type": "feet", "amount": 60 } },
+      "components": { "v": true, "s": true },
+      "duration": [{ "type": "instant" }],
+      "entries": [
+        "You hurl a crackling mote of imaginary energy at a creature you can see. Make a ranged spell attack; on a hit, the target takes {@dice 1d8} pretend damage."
+      ]
+    },
+    {
+      "name": "Fake Shimmer",
+      "source": "TBK",
+      "level": 0,
+      "school": "V",
+      "time": [{ "number": 1, "unit": "action" }],
+      "range": { "type": "self" },
+      "components": { "v": true },
+      "duration": [{ "type": "timed", "duration": { "type": "round", "amount": 1 } }],
+      "entries": [
+        "Your outline glitters with harmless sparks until the start of your next turn."
+      ]
+    },
+    {
+      "name": "Greater Fake Bolt",
+      "source": "TBK",
+      "level": 4,
+      "school": "V",
+      "time": [{ "number": 1, "unit": "action" }],
+      "range": { "type": "point", "distance": { "type": "feet", "amount": 120 } },
+      "components": { "v": true, "s": true },
+      "duration": [{ "type": "instant" }],
+      "entries": [
+        "As Fake Bolt, but considerably more so. The target takes {@dice 4d8} pretend damage."
+      ]
+    },
+    {
+      "name": "Fake Blast",
+      "source": "TBK",
+      "level": 3,
+      "school": "V",
+      "time": [{ "number": 1, "unit": "action" }],
+      "range": { "type": "point", "distance": { "type": "feet", "amount": 150 } },
+      "components": { "v": true, "s": true, "m": "a pinch of glitter" },
+      "duration": [{ "type": "instant" }],
+      "entries": [
+        "A shower of dazzling but entirely fictional sparks erupts at a point you choose. Each creature in a 20-foot radius must make a Dexterity saving throw, taking {@dice 6d6} pretend damage on a failure."
+      ],
+      "entriesHigherLevel": [
+        {
+          "type": "entries",
+          "name": "At Higher Levels",
+          "entries": [
+            "When you cast this spell using a spell slot of 4th level or higher, the pretend damage increases by {@dice 1d6} for each slot level above 3rd."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Fake Whisper",
+      "source": "TBK",
+      "level": 1,
+      "school": "E",
+      "time": [{ "number": 1, "unit": "action" }],
+      "range": { "type": "point", "distance": { "type": "feet", "amount": 30 } },
+      "components": { "v": true },
+      "duration": [{ "type": "timed", "duration": { "type": "minute", "amount": 1 }, "concentration": true }],
+      "entries": [
+        "You murmur a suggestion so unconvincing that the target must succeed on a Wisdom saving throw or spend its turn politely pretending to consider it."
+      ]
+    },
+    {
+      "name": "Fake Ward",
+      "source": "TBK",
+      "level": 2,
+      "school": "A",
+      "time": [
+        { "number": 1, "unit": "reaction", "condition": "which you take when an imaginary threat menaces you" }
+      ],
+      "range": { "type": "self" },
+      "components": { "s": true },
+      "duration": [{ "type": "timed", "duration": { "type": "round", "amount": 1 } }],
+      "entries": [
+        "A translucent barrier of pure make-believe springs up around you, granting +2 AC against attacks that were never real."
+      ]
+    },
+    {
+      "name": "Fake Cataclysm",
+      "source": "TBK",
+      "level": 9,
+      "school": "C",
+      "time": [{ "number": 1, "unit": "minute" }],
+      "range": { "type": "point", "distance": { "type": "miles", "amount": 1 } },
+      "components": { "v": true, "s": true, "m": "a snow globe depicting a city" },
+      "duration": [{ "type": "instant" }],
+      "entries": [
+        "You conjure the vivid illusion of an apocalypse. Nothing is harmed, but everyone within a mile is deeply impressed."
+      ]
+    }
+  ]
+}

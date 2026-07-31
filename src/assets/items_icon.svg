@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!-- Uploaded to: SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools -->
+<svg fill="currentColor" viewBox="0 0 24 24" id="Layer_1" data-name="Layer 1" xmlns="http://www.w3.org/2000/svg"
+  xmlns:xlink="http://www.w3.org/1999/xlink">
+
+  <defs>
+
+    <style>
+      .cls-1 {
+        fill: none;
+      }
+
+      .cls-2 {
+        clip-path: url(#clip-path);
+      }
+    </style>
+
+    <clipPath id="clip-path">
+
+      <rect class="cls-1" x="0.13" width="24" height="24" />
+
+    </clipPath>
+
+  </defs>
+
+  <title>cash-bag</title>
+
+  <g class="cls-2">
+
+    <path
+      d="M19,21.5H5a1,1,0,0,1-1-1V14.56A7.07,7.07,0,0,1,11.06,7.5h1.88A7.07,7.07,0,0,1,20,14.56V20.5A1,1,0,0,1,19,21.5Zm-13-2H18V14.56A5.07,5.07,0,0,0,12.94,9.5H11.06A5.07,5.07,0,0,0,6,14.56Z" />
+
+    <path
+      d="M14,9.6a1,1,0,0,1-.61-.22A1,1,0,0,1,13.22,8L16,4.5H8.05L10.78,8A1,1,0,0,1,9.2,9.21l-4-5.09A1,1,0,0,1,6,2.5H18a1,1,0,0,1,.79,1.62l-4,5.09A1,1,0,0,1,14,9.6Z" />
+
+  </g>
+
+</svg>

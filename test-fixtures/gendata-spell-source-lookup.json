@@ -1,0 +1,23 @@
+{
+  "tbk": {
+    "fake bolt": {
+      "class": { "TBK": { "Fake Mage": true } },
+      "subclass": { "TBK": { "Fake Warrior": { "TBK": { "Fake Fist": { "name": "Fake Fist" } } } } }
+    },
+    "fake shimmer": {
+      "class": { "TBK": { "Fake Mage": true } },
+      "subclass": { "TBK": { "Fake Warrior": { "TBK": { "Fake Fist": { "name": "Fake Fist" } } } } }
+    },
+    "fake whisper": {
+      "class": { "TBK": { "Fake Mage": true, "Fake Paladin": true } },
+      "subclass": { "TBK": { "Fake Warrior": { "TBK": { "Fake Fist": { "name": "Fake Fist" } } } } }
+    },
+    "fake ward": {
+      "class": { "TBK": { "Fake Mage": true, "Fake Paladin": true } },
+      "subclass": { "TBK": { "Fake Warrior": { "TBK": { "Fake Fist": { "name": "Fake Fist" } } } } }
+    },
+    "fake blast": { "class": { "TBK": { "Fake Mage": true, "Fake Paladin": true } } },
+    "greater fake bolt": { "class": { "TBK": { "Fake Mage": true, "Fake Paladin": true } } },
+    "fake cataclysm": { "class": { "TBK": { "Fake Mage": true, "Fake Paladin": true } } }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "optionalfeature": [
+    {
+      "name": "Fake Sight",
+      "source": "TBK",
+      "featureType": ["EI"],
+      "entries": [
+        "You can see in dim light and darkness as if it were brighter, out to a suspiciously specific radius."
+      ]
+    },
+    {
+      "name": "Fake Weapon Focus",
+      "source": "TBK",
+      "featureType": ["FS:F", "FS:R"],
+      "entries": [
+        "You gain a +2 bonus to attack rolls you make with weapons that aren't real."
+      ]
+    },
+    {
+      "name": "Fake Empowered Bolt",
+      "source": "TBK",
+      "featureType": ["EI"],
+      "prerequisite": [{ "spell": ["fake bolt#c"] }],
+      "entries": [
+        "When you cast Fake Bolt, add your Charisma modifier to the pretend damage it deals on a hit."
+      ]
+    },
+    {
+      "name": "Fake Arcane Surge",
+      "source": "TBK",
+      "featureType": ["MM"],
+      "prerequisite": [{ "level": { "level": 5, "class": { "name": "Fake Mage" } } }],
+      "consumes": { "name": "Fake Sorcery Point", "amount": 1 },
+      "entries": [
+        "When you cast a spell, you can spend 1 Fake Sorcery Point to make it feel more dramatic. This has no mechanical effect."
+      ]
+    },
+    {
+      "name": "Fake Deep Cut",
+      "source": "TBK",
+      "featureType": ["MV:B"],
+      "consumes": { "name": "Fake Superiority Die" },
+      "entries": [
+        "When you hit a creature with a weapon attack, you can expend one Fake Superiority Die to add it to the damage roll."
+      ]
+    },
+    {
+      "name": "Fake Trip Attack",
+      "source": "TBK",
+      "featureType": ["MV:B"],
+      "consumes": { "name": "Fake Superiority Die" },
+      "entries": [
+        "When you hit a creature with a weapon attack, you can expend one Fake Superiority Die to try to knock it down."
+      ]
+    },
+    {
+      "name": "Fake Guard Stance",
+      "source": "TBK",
+      "featureType": ["FS:F"],
+      "entries": [
+        "While you are wielding a shield that isn't real, your imaginary AC increases by 1."
+      ]
+    },
+    {
+      "name": "Fake Elemental Burst",
+      "source": "TBK",
+      "featureType": ["ED"],
+      "prerequisite": [{
+        "level": {
+          "level": 3,
+          "class": { "name": "Fake Warrior" },
+          "subclass": { "name": "Fake Fist" }
+        }
+      }],
+      "entries": [
+        "You spend 2 ki points to unleash a burst of imaginary elemental energy in a 15-foot cone."
+      ]
+    },
+    {
+      "name": "Fake Blade Bond",
+      "source": "TBK",
+      "featureType": ["EI"],
+      "prerequisite": [{ "pact": "Fake Chain" }],
+      "entries": [
+        "You can telepathically speak to your fake familiar and perceive through its senses while it's on the same plane of existence as you."
+      ]
+    },
+    {
+      "name": "Pact of the Fake Chain",
+      "source": "TBK",
+      "featureType": ["PB"],
+      "entries": [
+        "You learn a spell that lets you summon a fake familiar, distinct from the one summoned by a real find familiar spell."
+      ]
+    }
+  ]
+}

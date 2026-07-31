@@ -1,0 +1,47 @@
+{
+  "feat": [
+    {
+      "name": "Fake Brawler",
+      "source": "TBK",
+      "prerequisite": [{ "ability": [{ "str": 13 }] }],
+      "entries": [
+        "You have mastered the art of the stage fight. Your unarmed strikes look devastating and deal no damage whatsoever, which is exactly what you intend."
+      ]
+    },
+    {
+      "name": "Fake Vigilance",
+      "source": "TBK",
+      "entries": [
+        "You appear intensely alert at all times. You gain no bonus to initiative, but everyone assumes you do, and that is its own kind of power."
+      ]
+    },
+    {
+      "name": "Fake Mark",
+      "source": "ZBK",
+      "prerequisite": [{ "other": "No other fake mark" }],
+      "ability": [{ "con": 1 }],
+      "entries": [
+        "A mysterious sigil has appeared on your arm. It means nothing, but it came with benefits:",
+        {
+          "type": "list",
+          "items": [
+            "You can make the mark glow faintly on command.",
+            "Once per long rest, you may dramatically reveal the mark to gain advantage on one Charisma (Performance) check."
+          ]
+        },
+        "You also develop a random quirk from the Fake Mark Quirks table.",
+        {
+          "type": "table",
+          "caption": "Fake Mark Quirks",
+          "colLabels": ["d4", "Quirk"],
+          "rows": [
+            ["1", "The mark hums off-key show tunes only you can hear."],
+            ["2", "The mark itches whenever someone tells the truth nearby."],
+            ["3", "The mark rearranges itself when nobody is looking."],
+            ["4", "The mark insists, via faint glowing, that it is a birthmark."]
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "item": [
+    {
+      "name": "Fake Sizzling Dagger",
+      "source": "TBK",
+      "type": "M",
+      "rarity": "rare",
+      "reqAttune": "by a fake rogue",
+      "weight": 1,
+      "value": 100,
+      "weaponCategory": "simple",
+      "property": ["L", "F"],
+      "dmg1": "1d4",
+      "dmgType": "P",
+      "bonusWeapon": "+1",
+      "entries": [
+        "This invented dagger crackles faintly, granting a +1 bonus to attack and damage rolls."
+      ]
+    },
+    {
+      "name": "Fake Sizzling Dagger (Awakened)",
+      "source": "TBK",
+      "bonusWeapon": "+2",
+      "_copy": {
+        "name": "Fake Sizzling Dagger",
+        "source": "TBK",
+        "_mod": {
+          "entries": {
+            "mode": "insertArr",
+            "index": -1,
+            "items": "When awakened, the dagger's bonus increases to +2 and it hums with imaginary power."
+          }
+        }
+      }
+    }
+  ],
+  "itemGroup": [
+    {
+      "name": "Fake Rings of Testing",
+      "source": "TBK",
+      "rarity": "uncommon",
+      "wondrous": true,
+      "reqAttune": true,
+      "items": ["Fake Ring of Testing, Alpha|TBK", "Fake Ring of Testing, Beta|TBK"],
+      "entries": ["An invented family of rings used only by the test suite."]
+    }
+  ]
+}

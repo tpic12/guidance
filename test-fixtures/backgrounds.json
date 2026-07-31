@@ -1,0 +1,90 @@
+{
+  "background": [
+    {
+      "name": "Fake Scholar",
+      "source": "TBK",
+      "skillProficiencies": [{ "history": true, "insight": true }],
+      "languageProficiencies": [{ "anyStandard": 2 }],
+      "entries": [
+        {
+          "type": "list",
+          "style": "list-hang-notitle",
+          "items": [
+            {
+              "type": "item",
+              "name": "Skill Proficiencies:",
+              "entry": "{@skill History}, {@skill Insight}"
+            },
+            {
+              "type": "item",
+              "name": "Languages:",
+              "entry": "Two of your choice"
+            },
+            {
+              "type": "item",
+              "name": "Equipment:",
+              "entry": "A blank book you insist is full of secrets, a bottle of invisible ink (empty), and a belt pouch containing 10 gp"
+            }
+          ]
+        },
+        {
+          "name": "Feature: Fake Erudition",
+          "type": "entries",
+          "entries": [
+            "You can confidently cite a source for any claim. The source does not exist, but checking would take weeks, and nobody ever does."
+          ],
+          "data": { "isFeature": true }
+        }
+      ]
+    },
+    {
+      "name": "Fake Wanderer",
+      "source": "ZBK",
+      "skillProficiencies": [{ "athletics": true, "survival": true }],
+      "toolProficiencies": [{ "anyMusicalInstrument": 1 }],
+      "entries": [
+        {
+          "type": "list",
+          "style": "list-hang-notitle",
+          "items": [
+            {
+              "type": "item",
+              "name": "Skill Proficiencies:",
+              "entry": "{@skill Athletics}, {@skill Survival}"
+            }
+          ]
+        },
+        {
+          "name": "Feature: Fake Directions",
+          "type": "entries",
+          "entries": [
+            "You can always describe the way to anywhere with total assurance. Your directions are wrong, but delivered so warmly that travelers thank you anyway."
+          ],
+          "data": { "isFeature": true }
+        }
+      ]
+    },
+    {
+      "name": "Fake City Scholar",
+      "source": "TBK",
+      "_copy": {
+        "name": "Fake Scholar",
+        "source": "TBK",
+        "_mod": {
+          "entries": {
+            "mode": "replaceArr",
+            "replace": "Feature: Fake Erudition",
+            "items": {
+              "name": "Feature: Fake City Erudition",
+              "type": "entries",
+              "entries": [
+                "As Fake Erudition, but your invented sources are all prestigious city institutions, which somehow makes them more convincing."
+              ],
+              "data": { "isFeature": true }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "baseitem": [
+    {
+      "name": "Fake Club",
+      "source": "TBK",
+      "type": "M",
+      "rarity": "none",
+      "weight": 2,
+      "value": 10,
+      "weaponCategory": "simple",
+      "property": ["L"],
+      "dmg1": "1d4",
+      "dmgType": "B"
+    }
+  ],
+  "itemProperty": [
+    {
+      "abbreviation": "L",
+      "entries": [{ "type": "entries", "name": "Light", "entries": ["An invented light property."] }]
+    },
+    {
+      "abbreviation": "F",
+      "entries": [{ "type": "entries", "name": "Finesse", "entries": ["An invented finesse property."] }]
+    }
+  ],
+  "itemType": [{ "abbreviation": "M", "name": "Melee Weapon" }]
+}

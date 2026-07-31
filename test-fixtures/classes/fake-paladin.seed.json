@@ -1,0 +1,57 @@
+{
+  "class": [
+    {
+      "name": "Fake Paladin",
+      "source": "TBK",
+      "hd": { "number": 1, "faces": 10 },
+      "proficiency": ["wis", "cha"],
+      "startingProficiencies": {
+        "armor": ["light", "medium", "shield"],
+        "weapons": ["simple", "martial"],
+        "skills": [{ "choose": { "from": ["athletics", "insight", "persuasion"], "count": 2 } }]
+      },
+      "startingEquipment": {
+        "default": ["a suspiciously shiny sword", "a banner of dubious heraldry"]
+      },
+      "subclassTitle": "Fake Oath",
+      "casterProgression": "1/2",
+      "spellcastingAbility": "cha"
+    }
+  ],
+  "subclass": [
+    {
+      "name": "Oath of Fakery",
+      "shortName": "Fakery",
+      "source": "TBK",
+      "className": "Fake Paladin",
+      "classSource": "TBK",
+      "additionalSpells": [
+        { "prepared": { "3": ["greater fake bolt"] } }
+      ]
+    }
+  ],
+  "classFeature": [
+    {
+      "name": "Fake Smite",
+      "source": "TBK",
+      "className": "Fake Paladin",
+      "level": 2,
+      "entries": [
+        "Once per turn, you can expend a spell slot to make your weapon glow ominously, though nothing else happens."
+      ]
+    }
+  ],
+  "subclassFeature": [
+    {
+      "name": "Oathly Fakery",
+      "source": "TBK",
+      "className": "Fake Paladin",
+      "subclassShortName": "Fakery",
+      "subclassSource": "TBK",
+      "level": 3,
+      "entries": [
+        "Your oath is so convincingly performed that onlookers assume it's genuine."
+      ]
+    }
+  ]
+}

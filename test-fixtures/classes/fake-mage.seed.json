@@ -1,0 +1,74 @@
+{
+  "class": [
+    {
+      "name": "Fake Mage",
+      "source": "TBK",
+      "hd": { "number": 1, "faces": 6 },
+      "proficiency": ["int", "wis"],
+      "startingProficiencies": {
+        "weapons": ["dagger"],
+        "skills": [{ "choose": { "from": ["arcana", "deception", "history"], "count": 2 } }]
+      },
+      "startingEquipment": {
+        "default": ["a staff with a suspiciously ordinary crystal", "a spellbook full of doodles"]
+      },
+      "subclassTitle": "Fake School",
+      "casterProgression": "full",
+      "spellcastingAbility": "int",
+      "cantripProgression": [4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
+      "spellsKnownProgression": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 13, 13, 14, 14, 15, 15, 15, 15],
+      "optionalfeatureProgression": [
+        {
+          "featureType": ["EI"],
+          "progression": [0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5]
+        },
+        { "featureType": ["PB"], "progression": { "3": 1 } }
+      ]
+    }
+  ],
+  "subclass": [
+    {
+      "name": "School of Fakery",
+      "shortName": "Fakery",
+      "source": "TBK",
+      "className": "Fake Mage",
+      "classSource": "TBK",
+      "additionalSpells": [
+        { "prepared": { "2": ["fake whisper"] } }
+      ]
+    }
+  ],
+  "classFeature": [
+    {
+      "name": "Fake Spellcasting",
+      "source": "TBK",
+      "className": "Fake Mage",
+      "level": 1,
+      "entries": [
+        "You wave your hands and say words. Occasionally, coincidentally, something magical happens nearby, and you take full credit."
+      ]
+    },
+    {
+      "name": "Expertise",
+      "source": "TBK",
+      "className": "Fake Mage",
+      "level": 1,
+      "entries": [
+        "At 1st level, choose two of your skill proficiencies. Your proficiency bonus is doubled for any ability check you make that uses either of the chosen proficiencies."
+      ]
+    }
+  ],
+  "subclassFeature": [
+    {
+      "name": "Fakery Savant",
+      "source": "TBK",
+      "className": "Fake Mage",
+      "subclassShortName": "Fakery",
+      "subclassSource": "TBK",
+      "level": 2,
+      "entries": [
+        "The gold and time you must spend to copy a fake spell into your spellbook is halved, because the spell is fake."
+      ]
+    }
+  ]
+}

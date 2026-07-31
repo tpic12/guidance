@@ -1,0 +1,112 @@
+{
+  "race": [
+    {
+      "name": "Fake Skyfolk",
+      "source": "TBK",
+      "size": ["M"],
+      "speed": { "walk": 30, "fly": true },
+      "ability": [{ "dex": 2, "wis": 1 }],
+      "entries": [
+        {
+          "type": "entries",
+          "name": "Unconvincing Glide",
+          "entries": [
+            "You can fly, but only while everyone is watching. If no creature can see you, you immediately begin to walk instead."
+          ]
+        },
+        {
+          "type": "entries",
+          "name": "Weather Sense",
+          "entries": [
+            "You always know whether it is currently raining on you."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Fake Tunnelkin",
+      "source": "TBK",
+      "size": ["S"],
+      "speed": 25,
+      "darkvision": 60,
+      "ability": [
+        { "con": 2, "choose": { "from": ["str", "dex", "con", "int", "wis", "cha"] } }
+      ],
+      "entries": [
+        "Generations underground have left the tunnelkin with several dubious gifts:",
+        {
+          "type": "list",
+          "items": [
+            "You can dig a hole slightly faster than someone with a better shovel.",
+            "You have advantage on checks to remember which way is down."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Fake Mimicborn",
+      "source": "ZBK",
+      "size": ["S", "M"],
+      "speed": { "walk": 30, "swim": 20 },
+      "ability": [{ "cha": 2, "choose": { "from": ["str", "dex"], "count": 1 } }],
+      "entries": [
+        {
+          "type": "entries",
+          "name": "Household Camouflage",
+          "entries": [
+            "As an action, you can transform into a piece of furniture from the Convincing Furniture table. You gain no benefit from this; the furniture is not convincing."
+          ]
+        },
+        {
+          "type": "table",
+          "caption": "Convincing Furniture",
+          "colLabels": ["d4", "Form"],
+          "rows": [
+            ["1", "A wobbly three-legged stool"],
+            ["2", "An ottoman with visible breathing"],
+            ["3", "A coat rack wearing your own coat"],
+            ["4", "A chest that giggles when opened"]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Fake Mimicborn (Renovated)",
+      "source": "ZBK",
+      "_copy": { "name": "Fake Mimicborn", "source": "ZBK" }
+    },
+    {
+      "name": "Fake Duskkin",
+      "source": "TBK",
+      "size": ["M"],
+      "speed": 30,
+      "ability": [{ "dex": 2, "wis": 1 }],
+      "entries": [
+        {
+          "type": "entries",
+          "name": "Dust Step",
+          "entries": [
+            "Once per day you can teleport a few feet, kicking up an unconvincing amount of dust."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Fake Duskkin",
+      "source": "ZBK",
+      "size": ["S"],
+      "speed": 25,
+      "darkvision": 60,
+      "ability": [{ "con": 2 }],
+      "entries": [
+        {
+          "type": "entries",
+          "name": "Grit Skin",
+          "entries": [
+            "You have resistance to paper cuts."
+          ]
+        }
+      ]
+    }
+  ]
+}
