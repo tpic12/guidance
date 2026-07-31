@@ -226,7 +226,7 @@ pub async fn get_subclass_spell_choice_pools(
 ) -> anyhow::Result<Vec<(u8, Vec<Spell>)>> {
     let rows = sqlx::query(
         "SELECT spell_level, class_name, school, count FROM subclass_spell_choice_grants \
-         WHERE subclass_id = ? AND grant_level <= ?",
+         WHERE subclass_id = ? AND grant_level <= ? ORDER BY id",
     )
     .bind(subclass_id)
     .bind(level as i64)

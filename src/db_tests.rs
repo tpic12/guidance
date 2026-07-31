@@ -982,6 +982,54 @@ async fn get_subclass_spell_choice_pools_filters_by_level_class_school_and_gates
 }
 
 #[tokio::test]
+async fn subclass_spell_choice_grants_insert_or_ignore_dedupes_on_reseed() {
+    // A `SEED_RESET=1` reseed re-inserts every grant row `seed_classes` reads
+    // from the fixtures. Without a real uniqueness constraint that treats
+    // NULL `class_name`/`school` consistently (SQLite's plain UNIQUE treats
+    // every NULL as distinct from every other NULL), re-seeding would
+    // silently duplicate rows for the common case where only one of those
+    // two filter fields is set. Exercise both the null-school and
+    // null-class_name shapes to confirm the COALESCE'd unique index catches
+    // both, not just the case where every column happens to be non-null.
+    let pool = test_pool().await;
+    insert_class(&pool, "fake-cleric", "Fake Cleric").await;
+    insert_subclass(&pool, "fake-nature-domain", "fake-cleric", "Fake Nature Domain").await;
+
+    for _ in 0..2 {
+        sqlx::query(
+            "INSERT OR IGNORE INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
+        )
+        .bind("fake-nature-domain")
+        .bind(1_i64)
+        .bind(0_i64)
+        .bind("Fake Druid")
+        .bind(None::<String>)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT OR IGNORE INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
+        )
+        .bind("fake-nature-domain")
+        .bind(1_i64)
+        .bind(0_i64)
+        .bind(None::<String>)
+        .bind("necromancy")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM subclass_spell_choice_grants")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row.0, 2, "re-inserting the same two grants should dedupe to 2 rows, not 4");
+}
+
+#[tokio::test]
 async fn character_crud_round_trips() {
     let pool = test_pool().await;
     insert_user(&pool, "owner-1", "owner").await;

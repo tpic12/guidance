@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
 
     if std::env::var("SEED_RESET").is_ok() {
         // guard: refuse to run against anything that isn't your local dev db file
-        for table in ["subclass_granted_spells", "subclass_spells", "class_spells", "subclass_features", "class_features", "subclasses", "classes", "spells", "backgrounds", "feats", "species", "optional_feature_prerequisite_pacts", "optional_feature_prerequisite_classes", "optional_feature_types", "optional_features", "item_properties", "items"] {
+        for table in ["subclass_granted_spells", "subclass_spell_choice_grants", "subclass_spells", "class_spells", "subclass_features", "class_features", "subclasses", "classes", "spells", "backgrounds", "feats", "species", "optional_feature_prerequisite_pacts", "optional_feature_prerequisite_classes", "optional_feature_types", "optional_features", "item_properties", "items"] {
             sqlx::query(&format!("DELETE FROM {table}")).execute(&pool).await?;
         }
     }
@@ -292,7 +292,7 @@ async fn seed_classes(pool: &SqlitePool, fixtures_dir: &str) -> anyhow::Result<(
 
                 for (grant_level, choice) in choice_grants {
                     sqlx::query(
-                        "INSERT INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
+                        "INSERT OR IGNORE INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
                     )
                     .bind(&subclass.id)
                     .bind(grant_level)

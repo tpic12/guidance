@@ -285,12 +285,13 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
             }
         }
     }
+    let mut seen_spell_grant_choices = HashSet::new();
     let spell_grant_choices_valid = character.spell_grant_choices.len() == spell_choice_slots.len()
         && character
             .spell_grant_choices
             .iter()
             .zip(&spell_choice_slots)
-            .all(|(choice, pool)| pool.contains(choice));
+            .all(|(choice, pool)| pool.contains(choice) && seen_spell_grant_choices.insert(choice));
     if !spell_grant_choices_valid {
         return Err(ServerFnError::new(
             "Subclass spell choices don't match what's unlocked for this character's classes",
@@ -4181,6 +4182,18 @@ fn spell_choice_slot(
     let heading = format!("{}: choose a {level_label}", choice_slot.source);
     let options = choice_slot.options;
     let focus_options = options.clone();
+    // Disabled once picked in a sibling slot — same reasoning as `skill_slot`'s
+    // `is_disabled`: a `count > 1` filter (e.g. Arcana Domain's "choose 2
+    // Wizard cantrips") expands into independent slots sharing one pool, and
+    // without this a player could pick the same spell in both, silently
+    // costing them a distinct pick the feature intends to grant.
+    let is_disabled = move |spell_id: &str| {
+        spell_grant_choices
+            .get()
+            .iter()
+            .enumerate()
+            .any(|(i, picked)| i != slot && picked.as_deref() == Some(spell_id))
+    };
 
     view! {
         <div class="flex flex-col gap-1 p-3 border border-base-300 rounded-box">
@@ -4206,11 +4219,13 @@ fn spell_choice_slot(
                         let value = spell.id.clone();
                         let label = spell.name.clone();
                         let selected_id = spell.id.clone();
+                        let disabled_id = spell.id.clone();
                         let hover_spell = spell.clone();
                         view! {
                             <option
                                 value=value
                                 selected=move || choice().as_deref() == Some(selected_id.as_str())
+                                disabled=move || is_disabled(&disabled_id)
                                 on:mouseenter=move |_| focused_spell.set(Some(hover_spell.clone()))
                             >
                                 {label}
