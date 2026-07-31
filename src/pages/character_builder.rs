@@ -2915,6 +2915,13 @@ fn asi_slot(
                                                     feats.iter().find(|f| f.id == current).cloned()
                                                 }
                                             };
+                                            // Resync on (re)mount so toggling the slot's kind away
+                                            // from "Feat" and back doesn't leave a stale hover
+                                            // preview showing a feat that's no longer selected.
+                                            Effect::new({
+                                                let committed_feat = committed_feat.clone();
+                                                move |_| focused_feat.set(committed_feat())
+                                            });
                                             view! {
                                                 <div class="flex flex-col lg:flex-row gap-3 w-full">
                                                     <ul
