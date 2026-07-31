@@ -22,3 +22,5 @@ dev.db*
 e2e.db*
 
 *.internal.md
+
+pnpm dlx tailwindcss
