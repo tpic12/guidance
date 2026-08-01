@@ -977,7 +977,6 @@ async fn get_subclass_spell_choice_pools_filters_by_level_class_school_and_gates
 
 #[tokio::test]
 async fn subclass_spell_choice_grants_insert_or_ignore_dedupes_on_reseed() {
-    // Covers both the null-school and null-class_name shapes.
     let pool = test_pool().await;
     insert_class(&pool, "fake-cleric", "Fake Cleric").await;
     insert_subclass(&pool, "fake-nature-domain", "fake-cleric", "Fake Nature Domain").await;

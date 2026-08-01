@@ -260,9 +260,6 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
         ));
     }
 
-    // Same convention `skill_choices` uses for `SkillSlots.choice_pools`:
-    // index-for-index against each filter's own pool, not the
-    // augmenting-path matching ordinary cantrip/spell pools need.
     let mut spell_choice_slots: Vec<Vec<String>> = Vec::new();
     let mut spell_choice_pool_spells: Vec<Spell> = Vec::new();
     for (entry, _detail, subclass) in &resolved {
@@ -271,8 +268,6 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
                 .await
                 .map_err(|err| ServerFnError::new(err.to_string()))?;
             for (count, spells) in pools {
-                // Skip an empty-resolving pool (e.g. an unimported class)
-                // rather than requiring an unfillable pick.
                 if spells.is_empty() {
                     continue;
                 }
@@ -907,8 +902,6 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             .unwrap_or_default();
         skill_slots(&combined_class_skills, &background_skills)
     });
-    // Every proficient skill, tagged with its granting class/background, for
-    // the Skills step's at-a-glance summary.
     let skill_proficiency_sources = Memo::new(move |_| -> Vec<(String, Vec<String>)> {
         let class_lookup: HashMap<String, Class> =
             class_details_map().into_iter().map(|(id, detail)| (id, detail.class)).collect();
@@ -1104,8 +1097,6 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             .unwrap_or_default()
     };
 
-    // Unlike `granted_spells_all` above (always-active, no choice), these
-    // are subclass spell grants the player actually picks from.
     let spell_choice_pools_all: Resource<
         Result<(Vec<EntryKey>, Vec<(String, String, Vec<(u8, Vec<Spell>)>)>), ServerFnError>,
     > = Resource::new(
@@ -1127,8 +1118,6 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         let expected: Vec<EntryKey> = resolved_entries.get().iter().map(entry_key).collect();
         spell_choice_pools_all.get().and_then(|r| r.ok()).is_some_and(|(keyed, _)| keyed == expected)
     };
-    // Flattens each filter row's `count` into that many pick slots,
-    // index-aligned to `spell_grant_choices`.
     let spell_choice_slots = Memo::new(move |_| -> Vec<SpellChoiceSlot> {
         spell_choice_pools_all
             .get()
@@ -1137,7 +1126,6 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             .unwrap_or_default()
             .into_iter()
             .flat_map(|(class_id, source, pools)| {
-                // Skip a pool that resolved empty (see save_character's matching skip).
                 pools.into_iter().filter(|(_, spells)| !spells.is_empty()).flat_map(move |(count, spells)| {
                     let class_id = class_id.clone();
                     let source = source.clone();
@@ -1150,7 +1138,6 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             })
             .collect()
     });
-    // Same reasoning as the skill-choices reset effect above.
     Effect::new(move |_| {
         if !spell_choice_pools_ready() {
             return;
@@ -4168,7 +4155,6 @@ fn spell_choice_slot(
     let heading = format!("{}: choose a {level_label}", choice_slot.source);
     let options = choice_slot.options;
     let focus_options = options.clone();
-    // Disabled once picked in a sibling slot, same reasoning as `skill_slot`.
     let is_disabled = move |spell_id: &str| {
         spell_grant_choices
             .get()

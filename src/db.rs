@@ -992,10 +992,6 @@ pub async fn get_character_sheet(
 
     let mut cantrips = get_spells_by_ids(pool, &character.cantrip_choices).await?;
     let mut spells = get_spells_by_ids(pool, &character.spell_choices).await?;
-    // Subclass `{"choose": ...}` grant picks (e.g. Cleric Nature Domain's
-    // free Druid cantrip — see Vikunja #57) are known/prepared the same as
-    // any other cantrip/spell once chosen, just from a different pool —
-    // fold them in here rather than adding a separate sheet section.
     for spell in get_spells_by_ids(pool, &character.spell_grant_choices).await? {
         if spell.level == 0 { cantrips.push(spell) } else { spells.push(spell) }
     }
