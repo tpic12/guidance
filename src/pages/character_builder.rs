@@ -281,11 +281,12 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
     }
     let mut seen_spell_grant_choices = HashSet::new();
     let spell_grant_choices_valid = character.spell_grant_choices.len() == spell_choice_slots.len()
-        && character
-            .spell_grant_choices
-            .iter()
-            .zip(&spell_choice_slots)
-            .all(|(choice, pool)| pool.contains(choice) && seen_spell_grant_choices.insert(choice));
+        && character.spell_grant_choices.iter().zip(&spell_choice_slots).all(|(choice, pool)| {
+            pool.contains(choice)
+                && seen_spell_grant_choices.insert(choice)
+                && !character.cantrip_choices.contains(choice)
+                && !character.spell_choices.contains(choice)
+        });
     if !spell_grant_choices_valid {
         return Err(ServerFnError::new(
             "Subclass spell choices don't match what's unlocked for this character's classes",
@@ -3617,7 +3618,14 @@ fn spells_step(
                     }
                     key=|(slot, _)| *slot
                     children=move |(slot, choice_slot)| {
-                        spell_choice_slot(slot, choice_slot, spell_grant_choices, focused_spell)
+                        spell_choice_slot(
+                            slot,
+                            choice_slot,
+                            spell_grant_choices,
+                            cantrip_choices,
+                            spell_choices,
+                            focused_spell,
+                        )
                     }
                 />
                 <Suspense fallback=move || {
@@ -4137,6 +4145,8 @@ fn spell_choice_slot(
     slot: usize,
     choice_slot: SpellChoiceSlot,
     spell_grant_choices: RwSignal<Vec<Option<String>>>,
+    cantrip_choices: RwSignal<Vec<String>>,
+    spell_choices: RwSignal<Vec<String>>,
     focused_spell: RwSignal<Option<Spell>>,
 ) -> impl IntoView {
     let choice = move || spell_grant_choices.get().get(slot).cloned().flatten();
@@ -4161,6 +4171,8 @@ fn spell_choice_slot(
             .iter()
             .enumerate()
             .any(|(i, picked)| i != slot && picked.as_deref() == Some(spell_id))
+            || cantrip_choices.get().iter().any(|id| id == spell_id)
+            || spell_choices.get().iter().any(|id| id == spell_id)
     };
 
     view! {
