@@ -755,6 +755,7 @@ fn character(id: &str, name: &str) -> Character {
         expertise_choices: vec![],
         cantrip_choices: vec![],
         spell_choices: vec![],
+        spell_grant_choices: vec![],
         optional_feature_choices: vec![],
         species_ability_choices: vec![],
         ability_bonus_source: AbilityBonusSource::default(),
@@ -921,6 +922,97 @@ async fn get_subclass_granted_spells_returns_only_unlocked_grants_ordered_by_lev
         at_level_3.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
         vec!["Charm Person", "Fireball"]
     );
+}
+
+#[tokio::test]
+async fn get_subclass_spell_choice_pools_filters_by_level_class_school_and_gates_on_grant_level() {
+    let pool = test_pool().await;
+    spell_fixtures(&pool).await; // Fireball(3, Evocation), Fire Bolt(0, Evocation), Charm Person(1, Enchantment)
+    insert_class(&pool, "fake-cleric", "Fake Cleric").await;
+    insert_class(&pool, "fake-druid", "Fake Druid").await;
+    insert_subclass(&pool, "fake-nature-domain", "fake-cleric", "Fake Nature Domain").await;
+
+    sqlx::query("INSERT INTO class_spells (class_id, spell_id) VALUES (?, ?)")
+        .bind("fake-druid")
+        .bind("fire-bolt")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "INSERT INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
+    )
+    .bind("fake-nature-domain")
+    .bind(1_i64)
+    .bind(0_i64)
+    .bind("Fake Druid")
+    .bind(None::<String>)
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
+    )
+    .bind("fake-nature-domain")
+    .bind(5_i64)
+    .bind(3_i64)
+    .bind(None::<String>)
+    .bind("evocation")
+    .bind(2_i64)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let at_level_1 = get_subclass_spell_choice_pools(&pool, "fake-nature-domain", 1).await.unwrap();
+    assert_eq!(at_level_1.len(), 1);
+    assert_eq!(at_level_1[0].0, 1);
+    assert_eq!(at_level_1[0].1.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), vec!["Fire Bolt"]);
+
+    let at_level_5 = get_subclass_spell_choice_pools(&pool, "fake-nature-domain", 5).await.unwrap();
+    assert_eq!(at_level_5.len(), 2);
+    let evocation_pool = at_level_5.iter().find(|(count, _)| *count == 2).unwrap();
+    assert_eq!(evocation_pool.1.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), vec!["Fireball"]);
+}
+
+#[tokio::test]
+async fn subclass_spell_choice_grants_insert_or_ignore_dedupes_on_reseed() {
+    let pool = test_pool().await;
+    insert_class(&pool, "fake-cleric", "Fake Cleric").await;
+    insert_subclass(&pool, "fake-nature-domain", "fake-cleric", "Fake Nature Domain").await;
+
+    for _ in 0..2 {
+        sqlx::query(
+            "INSERT OR IGNORE INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
+        )
+        .bind("fake-nature-domain")
+        .bind(1_i64)
+        .bind(0_i64)
+        .bind("Fake Druid")
+        .bind(None::<String>)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT OR IGNORE INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
+        )
+        .bind("fake-nature-domain")
+        .bind(1_i64)
+        .bind(0_i64)
+        .bind(None::<String>)
+        .bind("necromancy")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM subclass_spell_choice_grants")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row.0, 2, "re-inserting the same two grants should dedupe to 2 rows, not 4");
 }
 
 #[tokio::test]

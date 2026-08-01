@@ -6,7 +6,7 @@ use crate::models::character::{
     CharacterSheet, ClassLevel, SpellcastingProfile, ABILITY_CODES,
 };
 use crate::models::class::{ability_label, Class, ClassDetail, ClassFeature, SubclassDetail};
-use crate::models::skill::{skill_label, SKILLS};
+use crate::models::skill::{skill_label, SkillGrant, SKILLS};
 use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
 use std::collections::{HashMap, HashSet};
@@ -162,8 +162,11 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
         let class_lookup: HashMap<String, Class> =
             resolved_classes.iter().map(|rc| (rc.detail.class.id.clone(), rc.detail.class.clone())).collect();
         let class_skills = multiclass_class_skill_grants(&character.classes, &class_lookup);
-        let background_skills =
-            sheet.background.as_ref().map(|background| background.skills.clone()).unwrap_or_default();
+        let background_skills: Vec<(String, SkillGrant)> = sheet
+            .background
+            .as_ref()
+            .map(|background| background.skills.iter().cloned().map(|grant| (background.name.clone(), grant)).collect())
+            .unwrap_or_default();
         let slots = skill_slots(&class_skills, &background_skills);
         let mut proficient: HashSet<String> = slots.fixed.into_iter().collect();
         proficient.extend(character.skill_choices.iter().cloned());
@@ -327,7 +330,9 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
 
         <div class="card bg-base-100 border border-base-300">
             <div class="card-body py-3 gap-1">
-                <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">"Saving Throws"</h2>
+                <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
+                    "Saving Throws"
+                </h2>
                 <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                     {saving_throws
                         .map(|(code, modifier, is_proficient)| {
@@ -344,7 +349,9 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
 
         <div class="card bg-base-100 border border-base-300">
             <div class="card-body py-3 gap-1">
-                <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">"Skills"</h2>
+                <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
+                    "Skills"
+                </h2>
                 <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                     {skill_rows
                         .map(|(name, modifier, is_proficient, is_expertise)| {
@@ -363,14 +370,13 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
         </div>
 
         {(|| {
-            // The shared slot pool comes from every non-Pact caster class
-            // combined (`multiclass_spell_slots` already special-cases a
-            // solo half/third caster to use their own table); Pact Magic
-            // (Warlock) is tracked as its own separate row, never merged in.
             let progressions: HashMap<String, Option<String>> = resolved_classes
                 .iter()
                 .map(|rc| {
-                    let profile = effective_spellcasting(&rc.detail.class, rc.subclass.map(|sd| &sd.subclass));
+                    let profile = effective_spellcasting(
+                        &rc.detail.class,
+                        rc.subclass.map(|sd| &sd.subclass),
+                    );
                     (rc.entry.class_id.clone(), profile.caster_progression)
                 })
                 .collect();
@@ -380,7 +386,10 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                 .filter(|(_, count)| **count > 0)
                 .map(|(level, count)| format!("Level {}: {count}", level + 1))
                 .collect();
-            let pact_slot_lines: Vec<String> = multiclass_pact_slots(&character.classes, &progressions)
+            let pact_slot_lines: Vec<String> = multiclass_pact_slots(
+                    &character.classes,
+                    &progressions,
+                )
                 .iter()
                 .enumerate()
                 .filter(|(_, count)| **count > 0)
@@ -389,7 +398,10 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
             let caster_lines: Vec<(String, SpellcastingProfile)> = resolved_classes
                 .iter()
                 .filter_map(|rc| {
-                    let profile = effective_spellcasting(&rc.detail.class, rc.subclass.map(|sd| &sd.subclass));
+                    let profile = effective_spellcasting(
+                        &rc.detail.class,
+                        rc.subclass.map(|sd| &sd.subclass),
+                    );
                     profile.caster_progression.as_ref()?;
                     Some((rc.detail.class.name.clone(), profile))
                 })
@@ -414,97 +426,106 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                 })
                 .collect();
             Some(
-                    view! {
-                        <div class="card bg-base-100 border border-base-300">
-                            <div class="card-body py-3 gap-1">
-                                <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">"Spells"</h2>
-                                {casting_lines
-                                    .into_iter()
-                                    .map(|line| view! { <p class="text-sm">{line}</p> })
-                                    .collect_view()}
-                                {(!slot_lines.is_empty())
-                                    .then(|| {
-                                        view! {
-                                            <p class="text-sm">
-                                                {format!("Slots — {}", slot_lines.join(", "))}
-                                            </p>
-                                        }
-                                    })}
-                                {(!pact_slot_lines.is_empty())
-                                    .then(|| {
-                                        view! {
-                                            <p class="text-sm">
-                                                {format!("Pact Magic slots — {}", pact_slot_lines.join(", "))}
-                                            </p>
-                                        }
-                                    })}
-                                {(!sheet.cantrips.is_empty())
-                                    .then(|| {
-                                        let names = sheet
-                                            .cantrips
-                                            .iter()
-                                            .map(|spell| spell.name.clone())
-                                            .collect::<Vec<_>>()
-                                            .join(", ");
-                                        view! {
-                                            <p class="text-sm">
-                                                <span class="font-semibold">"Cantrips: "</span>
-                                                {names}
-                                            </p>
-                                        }
-                                    })}
-                                {(!sheet.spells.is_empty())
-                                    .then(|| {
-                                        view! {
-                                            <div class="flex flex-col gap-1">
-                                                <span class="font-semibold text-sm">"Spells known:"</span>
-                                                {sheet
-                                                    .spells
-                                                    .iter()
-                                                    .map(|spell| {
-                                                        let line = format!(
+                // The shared slot pool comes from every non-Pact caster class
+                // combined (`multiclass_spell_slots` already special-cases a
+                // solo half/third caster to use their own table); Pact Magic
+                // (Warlock) is tracked as its own separate row, never merged in.
+                view! {
+                    <div class="card bg-base-100 border border-base-300">
+                        <div class="card-body py-3 gap-1">
+                            <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
+                                "Spells"
+                            </h2>
+                            {casting_lines
+                                .into_iter()
+                                .map(|line| view! { <p class="text-sm">{line}</p> })
+                                .collect_view()}
+                            {(!slot_lines.is_empty())
+                                .then(|| {
+                                    view! {
+                                        <p class="text-sm">
+                                            {format!("Slots — {}", slot_lines.join(", "))}
+                                        </p>
+                                    }
+                                })}
+                            {(!pact_slot_lines.is_empty())
+                                .then(|| {
+                                    view! {
+                                        <p class="text-sm">
+                                            {format!(
+                                                "Pact Magic slots — {}",
+                                                pact_slot_lines.join(", "),
+                                            )}
+                                        </p>
+                                    }
+                                })}
+                            {(!sheet.cantrips.is_empty())
+                                .then(|| {
+                                    let names = sheet
+                                        .cantrips
+                                        .iter()
+                                        .map(|spell| spell.name.clone())
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    view! {
+                                        <p class="text-sm">
+                                            <span class="font-semibold">"Cantrips: "</span>
+                                            {names}
+                                        </p>
+                                    }
+                                })}
+                            {(!sheet.spells.is_empty())
+                                .then(|| {
+                                    view! {
+                                        <div class="flex flex-col gap-1">
+                                            <span class="font-semibold text-sm">"Spells known:"</span>
+                                            {sheet
+                                                .spells
+                                                .iter()
+                                                .map(|spell| {
+                                                    let line = format!(
+                                                        "{} (L{} {})",
+                                                        spell.name,
+                                                        spell.level,
+                                                        spell.school.label(),
+                                                    );
+                                                    view! { <p class="text-sm">{line}</p> }
+                                                })
+                                                .collect_view()}
+                                        </div>
+                                    }
+                                })}
+                            {(!sheet.granted_spells.is_empty())
+                                .then(|| {
+                                    view! {
+                                        <div class="flex flex-col gap-1">
+                                            <span class="font-semibold text-sm">
+                                                "Granted spells (always prepared):"
+                                            </span>
+                                            {sheet
+                                                .granted_spells
+                                                .iter()
+                                                .map(|spell| {
+                                                    let line = if spell.level == 0 {
+                                                        format!("{} (Cantrip)", spell.name)
+                                                    } else {
+                                                        format!(
                                                             "{} (L{} {})",
                                                             spell.name,
                                                             spell.level,
                                                             spell.school.label(),
-                                                        );
-                                                        view! { <p class="text-sm">{line}</p> }
-                                                    })
-                                                    .collect_view()}
-                                            </div>
-                                        }
-                                    })}
-                                {(!sheet.granted_spells.is_empty())
-                                    .then(|| {
-                                        view! {
-                                            <div class="flex flex-col gap-1">
-                                                <span class="font-semibold text-sm">
-                                                    "Granted spells (always prepared):"
-                                                </span>
-                                                {sheet
-                                                    .granted_spells
-                                                    .iter()
-                                                    .map(|spell| {
-                                                        let line = if spell.level == 0 {
-                                                            format!("{} (Cantrip)", spell.name)
-                                                        } else {
-                                                            format!(
-                                                                "{} (L{} {})",
-                                                                spell.name,
-                                                                spell.level,
-                                                                spell.school.label(),
-                                                            )
-                                                        };
-                                                        view! { <p class="text-sm">{line}</p> }
-                                                    })
-                                                    .collect_view()}
-                                            </div>
-                                        }
-                                    })}
-                            </div>
+                                                        )
+                                                    };
+                                                    view! { <p class="text-sm">{line}</p> }
+                                                })
+                                                .collect_view()}
+                                        </div>
+                                    }
+                                })}
                         </div>
-                    },
-                )
+                    </div>
+                },
+            )
         })()}
 
         {(!ability_asis.is_empty())
@@ -512,7 +533,9 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                 view! {
                     <div class="card bg-base-100 border border-base-300">
                         <div class="card-body py-3 gap-1">
-                            <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">"Ability Score Improvements"</h2>
+                            <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
+                                "Ability Score Improvements"
+                            </h2>
                             {ability_asis
                                 .into_iter()
                                 .map(|line| view! { <p class="text-sm">{line}</p> })
@@ -524,10 +547,11 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
 
         <div class="card bg-base-100 border border-base-300">
             <div class="card-body py-3 gap-2">
-                <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">"Proficiencies & Training"</h2>
+                <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
+                    "Proficiencies & Training"
+                </h2>
                 {(!resolved_classes.is_empty())
                     .then(|| {
-                        // Only the primary class grants its full armor/weapon/tool set — later classes get `multiclass_proficiencies`, same rule as skills.
                         let mut armor = Vec::new();
                         let mut weapons = Vec::new();
                         let mut tools = Vec::new();
@@ -549,6 +573,7 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                             (!value.is_empty())
                                 .then(|| {
                                     let label = label.to_string();
+                                    // Only the primary class grants its full armor/weapon/tool set — later classes get `multiclass_proficiencies`, same rule as skills.
                                     view! {
                                         <p class="text-sm">
                                             <span class="font-semibold">{label} ": "</span>

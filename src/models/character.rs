@@ -50,6 +50,10 @@ pub struct Character {
     /// Spells known/prepared, by spell id. Always empty for non-casters.
     #[serde(default)]
     pub spell_choices: Vec<String>,
+    /// Spells picked to fill a subclass's `{"choose": ...}` filter grants
+    /// (e.g. Cleric Nature Domain's "any Druid cantrip").
+    #[serde(default)]
+    pub spell_grant_choices: Vec<String>,
     /// Optional features chosen (Invocations, Fighting Style, Maneuvers,
     /// ...), by `OptionalFeature` id. Always empty for classes/subclasses
     /// that don't grant any.
@@ -996,6 +1000,13 @@ pub fn active_subclass<'a>(
     unlocked.then(|| class_detail.subclass(subclass_id)).flatten()
 }
 
+/// One required skill choice-pool slot, labelled with its granting class/background.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkillChoicePool {
+    pub source: String,
+    pub options: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SkillSlots {
     /// Skills granted outright by class + background, deduped.
@@ -1003,7 +1014,7 @@ pub struct SkillSlots {
     /// One entry per required pick-slot: the grant's own option list, or the
     /// full `SKILLS` list if that grant's own list can't satisfy its count
     /// once already-fixed skills are excluded (see `skill_slots`).
-    pub choice_pools: Vec<Vec<String>>,
+    pub choice_pools: Vec<SkillChoicePool>,
 }
 
 /// Merges class + background skill grants into the fixed set and the
@@ -1022,19 +1033,26 @@ pub struct SkillSlots {
 /// first class — every class taken afterward only grants its smaller
 /// `multiclass_proficiencies`. Feed the result into `skill_slots` as its
 /// `class_skills` argument, same as a single class always has been.
-pub fn multiclass_class_skill_grants(classes: &[ClassLevel], class_lookup: &HashMap<String, Class>) -> Vec<SkillGrant> {
+pub fn multiclass_class_skill_grants(
+    classes: &[ClassLevel],
+    class_lookup: &HashMap<String, Class>,
+) -> Vec<(String, SkillGrant)> {
     let mut combined = Vec::new();
     for (index, entry) in classes.iter().enumerate() {
         let Some(class) = class_lookup.get(&entry.class_id) else { continue };
         let profs = if index == 0 { &class.proficiencies } else { &class.multiclass_proficiencies };
-        combined.extend(profs.skills.clone());
+        let source = if index == 0 { class.name.clone() } else { format!("{} (multiclass)", class.name) };
+        combined.extend(profs.skills.iter().cloned().map(|grant| (source.clone(), grant)));
     }
     combined
 }
 
-pub fn skill_slots(class_skills: &[SkillGrant], background_skills: &[SkillGrant]) -> SkillSlots {
+pub fn skill_slots(
+    class_skills: &[(String, SkillGrant)],
+    background_skills: &[(String, SkillGrant)],
+) -> SkillSlots {
     let mut fixed = Vec::new();
-    for grant in class_skills.iter().chain(background_skills.iter()) {
+    for (_, grant) in class_skills.iter().chain(background_skills.iter()) {
         if let SkillGrant::Fixed { skills } = grant {
             fixed.extend(skills.iter().cloned());
         }
@@ -1045,19 +1063,19 @@ pub fn skill_slots(class_skills: &[SkillGrant], background_skills: &[SkillGrant]
     let all_skills: Vec<String> = SKILLS.iter().map(|(name, _)| name.to_string()).collect();
 
     let mut choice_pools = Vec::new();
-    for grant in class_skills.iter().chain(background_skills.iter()) {
+    for (source, grant) in class_skills.iter().chain(background_skills.iter()) {
         match grant {
             SkillGrant::Fixed { .. } => {}
             SkillGrant::Choose { count, from } => {
                 let available = from.iter().filter(|skill| !fixed.contains(skill)).count();
                 let pool = if available >= *count as usize { from.clone() } else { all_skills.clone() };
                 for _ in 0..*count {
-                    choice_pools.push(pool.clone());
+                    choice_pools.push(SkillChoicePool { source: source.clone(), options: pool.clone() });
                 }
             }
             SkillGrant::Any { count } => {
                 for _ in 0..*count {
-                    choice_pools.push(all_skills.clone());
+                    choice_pools.push(SkillChoicePool { source: source.clone(), options: all_skills.clone() });
                 }
             }
         }

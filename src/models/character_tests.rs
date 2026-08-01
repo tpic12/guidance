@@ -26,6 +26,7 @@ fn character() -> Character {
         expertise_choices: vec![],
         cantrip_choices: vec![],
         spell_choices: vec![],
+        spell_grant_choices: vec![],
         optional_feature_choices: vec![],
         species_ability_choices: vec![],
         ability_bonus_source: AbilityBonusSource::default(),
@@ -695,10 +696,11 @@ fn validate_rejects_invalid_or_duplicate_skill_choices() {
 
 #[test]
 fn skill_slots_dedups_fixed_grants_across_sources() {
-    let class_skills = vec![SkillGrant::Fixed { skills: vec!["history".to_string()] }];
-    let background_skills = vec![SkillGrant::Fixed {
-        skills: vec!["history".to_string(), "insight".to_string()],
-    }];
+    let class_skills = vec![("Fake Class".to_string(), SkillGrant::Fixed { skills: vec!["history".to_string()] })];
+    let background_skills = vec![(
+        "Fake Background".to_string(),
+        SkillGrant::Fixed { skills: vec!["history".to_string(), "insight".to_string()] },
+    )];
     let slots = skill_slots(&class_skills, &background_skills);
     assert_eq!(slots.fixed, vec!["history".to_string(), "insight".to_string()]);
     assert!(slots.choice_pools.is_empty());
@@ -706,22 +708,26 @@ fn skill_slots_dedups_fixed_grants_across_sources() {
 
 #[test]
 fn skill_slots_choose_grant_uses_its_own_list_when_uncontested() {
-    let class_skills = vec![SkillGrant::Choose {
-        count: 2,
-        from: vec!["arcana".to_string(), "deception".to_string(), "history".to_string()],
-    }];
+    let class_skills = vec![(
+        "Fake Class".to_string(),
+        SkillGrant::Choose {
+            count: 2,
+            from: vec!["arcana".to_string(), "deception".to_string(), "history".to_string()],
+        },
+    )];
     let slots = skill_slots(&class_skills, &[]);
     assert_eq!(slots.choice_pools.len(), 2);
     for pool in &slots.choice_pools {
-        assert_eq!(pool, &vec!["arcana".to_string(), "deception".to_string(), "history".to_string()]);
+        assert_eq!(pool.source, "Fake Class");
+        assert_eq!(pool.options, vec!["arcana".to_string(), "deception".to_string(), "history".to_string()]);
     }
 }
 
 #[test]
 fn skill_slots_any_grant_offers_the_full_skill_list() {
-    let slots = skill_slots(&[SkillGrant::Any { count: 1 }], &[]);
+    let slots = skill_slots(&[("Fake Class".to_string(), SkillGrant::Any { count: 1 })], &[]);
     assert_eq!(slots.choice_pools.len(), 1);
-    assert_eq!(slots.choice_pools[0].len(), SKILLS.len());
+    assert_eq!(slots.choice_pools[0].options.len(), SKILLS.len());
 }
 
 #[test]
@@ -729,17 +735,22 @@ fn skill_slots_falls_back_to_full_list_when_choices_collide_with_fixed_grants() 
     // Mirrors the fake-warrior/fake-wanderer e2e fixture collision: a class
     // offers "choose 2 from athletics/intimidation/survival" but the
     // background already fixed-grants two of those three.
-    let class_skills = vec![SkillGrant::Choose {
-        count: 2,
-        from: vec!["athletics".to_string(), "intimidation".to_string(), "survival".to_string()],
-    }];
-    let background_skills =
-        vec![SkillGrant::Fixed { skills: vec!["athletics".to_string(), "survival".to_string()] }];
+    let class_skills = vec![(
+        "Fake Class".to_string(),
+        SkillGrant::Choose {
+            count: 2,
+            from: vec!["athletics".to_string(), "intimidation".to_string(), "survival".to_string()],
+        },
+    )];
+    let background_skills = vec![(
+        "Fake Background".to_string(),
+        SkillGrant::Fixed { skills: vec!["athletics".to_string(), "survival".to_string()] },
+    )];
     let slots = skill_slots(&class_skills, &background_skills);
     assert_eq!(slots.fixed, vec!["athletics".to_string(), "survival".to_string()]);
     assert_eq!(slots.choice_pools.len(), 2);
     for pool in &slots.choice_pools {
-        assert_eq!(pool.len(), SKILLS.len(), "expected a fallback to the full skill list");
+        assert_eq!(pool.options.len(), SKILLS.len(), "expected a fallback to the full skill list");
     }
 }
 
@@ -747,17 +758,21 @@ fn skill_slots_falls_back_to_full_list_when_choices_collide_with_fixed_grants() 
 fn skill_slots_keeps_narrow_list_when_only_one_of_several_options_collides() {
     // arcana+deception alone already satisfy a required count of 2, so the
     // history/insight collision shouldn't trigger the full-list fallback.
-    let class_skills = vec![SkillGrant::Choose {
-        count: 2,
-        from: vec!["arcana".to_string(), "deception".to_string(), "history".to_string()],
-    }];
-    let background_skills = vec![SkillGrant::Fixed {
-        skills: vec!["history".to_string(), "insight".to_string()],
-    }];
+    let class_skills = vec![(
+        "Fake Class".to_string(),
+        SkillGrant::Choose {
+            count: 2,
+            from: vec!["arcana".to_string(), "deception".to_string(), "history".to_string()],
+        },
+    )];
+    let background_skills = vec![(
+        "Fake Background".to_string(),
+        SkillGrant::Fixed { skills: vec!["history".to_string(), "insight".to_string()] },
+    )];
     let slots = skill_slots(&class_skills, &background_skills);
     assert_eq!(slots.choice_pools.len(), 2);
     for pool in &slots.choice_pools {
-        assert_eq!(pool, &vec!["arcana".to_string(), "deception".to_string(), "history".to_string()]);
+        assert_eq!(pool.options, vec!["arcana".to_string(), "deception".to_string(), "history".to_string()]);
     }
 }
 

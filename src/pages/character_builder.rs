@@ -11,8 +11,8 @@ use crate::models::character::{
     multiclass_spell_profiles, optional_feature_quota, point_buy_cost, proficiency_bonus, resolve_ability_bonus,
     resolved_hp_max_multiclass,
     skill_slots, spells_known_count, subclass_unlock_level, total_level, AbilityBonusSource, AbilityMethod,
-    AbilityScores, AsiChoice, Character, ClassLevel, HpMethod, SkillSlots, SpellcastingProfile, ABILITY_CODES,
-    POINT_BUY_BUDGET, STANDARD_ARRAY,
+    AbilityScores, AsiChoice, Character, ClassLevel, HpMethod, SkillChoicePool, SkillSlots, SpellcastingProfile,
+    ABILITY_CODES, POINT_BUY_BUDGET, STANDARD_ARRAY,
 };
 use crate::models::class::{ability_label, Class, ClassDetail, Subclass};
 use crate::models::feat::{Feat, FeatQuery};
@@ -20,7 +20,7 @@ use crate::models::optional_feature::{
     is_eligible, prerequisite_label, EligibilityContext, FeatureType, OptionalFeature, OptionalFeatureQuery,
     ResourceCost,
 };
-use crate::models::skill::{describe_skill_grants, skill_label};
+use crate::models::skill::{describe_skill_grants, skill_label, SkillGrant};
 use crate::models::species::{is_free_ability_choice, AbilityBonusGrant, Species, SpeciesQuery};
 use crate::models::spell::Spell;
 use crate::pages::backgrounds::{get_background, get_backgrounds};
@@ -29,7 +29,7 @@ use crate::pages::classes::get_classes;
 use crate::pages::feats::get_feats;
 use crate::pages::optional_features::get_optional_features;
 use crate::pages::species::{get_species, get_species_by_id};
-use crate::pages::spells::{get_class_spell_options, get_subclass_granted_spells};
+use crate::pages::spells::{get_class_spell_options, get_subclass_granted_spells, get_subclass_spell_choice_pools};
 use leptos::prelude::*;
 use leptos::server_fn::codec::Json;
 use leptos_router::hooks::{use_navigate, use_params_map};
@@ -131,13 +131,19 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
     let class_lookup: HashMap<String, Class> =
         class_details.iter().map(|(id, detail)| (id.clone(), detail.class.clone())).collect();
     let combined_class_skills = multiclass_class_skill_grants(&character.classes, &class_lookup);
+    let background_skills: Vec<(String, SkillGrant)> =
+        background.skills.iter().cloned().map(|grant| (background.name.clone(), grant)).collect();
     // A choice matching a fixed grant is allowed — it's a wasted pick, not
     // an invalid one; `Character::validate()` already rejected duplicates
     // within skill_choices itself, so picking the same already-fixed skill
     // twice across slots is caught there, not here.
-    let slots = skill_slots(&combined_class_skills, &background.skills);
+    let slots = skill_slots(&combined_class_skills, &background_skills);
     let skill_choices_valid = character.skill_choices.len() == slots.choice_pools.len()
-        && character.skill_choices.iter().zip(&slots.choice_pools).all(|(choice, pool)| pool.contains(choice));
+        && character
+            .skill_choices
+            .iter()
+            .zip(&slots.choice_pools)
+            .all(|(choice, pool)| pool.options.contains(choice));
     if !skill_choices_valid {
         return Err(ServerFnError::new(
             "Skill choices don't match what's unlocked for these classes and background",
@@ -254,6 +260,39 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
         ));
     }
 
+    let mut spell_choice_slots: Vec<Vec<String>> = Vec::new();
+    let mut spell_choice_pool_spells: Vec<Spell> = Vec::new();
+    for (entry, _detail, subclass) in &resolved {
+        if let Some(subclass) = subclass {
+            let pools = crate::db::get_subclass_spell_choice_pools(&pool, &subclass.id, entry.level)
+                .await
+                .map_err(|err| ServerFnError::new(err.to_string()))?;
+            for (count, spells) in pools {
+                if spells.is_empty() {
+                    continue;
+                }
+                let ids: Vec<String> = spells.iter().map(|s| s.id.clone()).collect();
+                for _ in 0..count {
+                    spell_choice_slots.push(ids.clone());
+                }
+                spell_choice_pool_spells.extend(spells);
+            }
+        }
+    }
+    let mut seen_spell_grant_choices = HashSet::new();
+    let spell_grant_choices_valid = character.spell_grant_choices.len() == spell_choice_slots.len()
+        && character.spell_grant_choices.iter().zip(&spell_choice_slots).all(|(choice, pool)| {
+            pool.contains(choice)
+                && seen_spell_grant_choices.insert(choice)
+                && !character.cantrip_choices.contains(choice)
+                && !character.spell_choices.contains(choice)
+        });
+    if !spell_grant_choices_valid {
+        return Err(ServerFnError::new(
+            "Subclass spell choices don't match what's unlocked for this character's classes",
+        ));
+    }
+
     // Same reasoning again, for optional features (Invocations, Fighting
     // Style, Maneuvers, ...): re-derive the active FeatureTypes, their
     // quotas, and each candidate's eligibility (level/class/subclass/pact/
@@ -270,6 +309,12 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
         })
         .map(|spell| spell.name.to_lowercase())
         .collect();
+    known_spell_names.extend(
+        spell_choice_pool_spells
+            .iter()
+            .filter(|spell| character.spell_grant_choices.contains(&spell.id))
+            .map(|spell| spell.name.to_lowercase()),
+    );
     for (entry, _detail, subclass) in &resolved {
         if let Some(subclass) = subclass {
             let granted = crate::db::get_subclass_granted_spells(&pool, &subclass.id, entry.level)
@@ -484,6 +529,15 @@ struct SpellRequirement {
     spells_required: usize,
 }
 
+/// One required pick slot from a subclass's `{"choose": ...}` spell grant —
+/// a `count: 2` filter expands into two slots.
+#[derive(Clone, PartialEq)]
+struct SpellChoiceSlot {
+    class_id: String,
+    source: String,
+    options: Vec<Spell>,
+}
+
 // `classes[0]` is brass, `classes[1]` teal, `classes[2]`+ ember — see `.class-band-N` in style/main.css.
 fn class_band_class(index: usize) -> &'static str {
     match index % 3 {
@@ -528,6 +582,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
     let expertise_choices = RwSignal::new(Vec::<Option<String>>::new());
     let cantrip_choices = RwSignal::new(Vec::<String>::new());
     let spell_choices = RwSignal::new(Vec::<String>::new());
+    let spell_grant_choices = RwSignal::new(Vec::<Option<String>>::new());
     let optional_feature_choices = RwSignal::new(Vec::<String>::new());
     let species_ability_choices = RwSignal::new(Vec::<String>::new());
     let ability_bonus_source = RwSignal::new(AbilityBonusSource::default());
@@ -661,6 +716,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             expertise_choices.set(existing.expertise_choices.into_iter().map(Some).collect());
             cantrip_choices.set(existing.cantrip_choices);
             spell_choices.set(existing.spell_choices);
+            spell_grant_choices.set(existing.spell_grant_choices.into_iter().map(Some).collect());
             optional_feature_choices.set(existing.optional_feature_choices);
             species_ability_choices.set(existing.species_ability_choices);
             ability_bonus_source.set(existing.ability_bonus_source);
@@ -706,6 +762,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             expertise_choices: expertise_choices.get().into_iter().flatten().collect(),
             cantrip_choices: cantrip_choices.get(),
             spell_choices: spell_choices.get(),
+            spell_grant_choices: spell_grant_choices.get().into_iter().flatten().collect(),
             optional_feature_choices: optional_feature_choices.get(),
             species_ability_choices: species_ability_choices.get(),
             ability_bonus_source: ability_bonus_source.get(),
@@ -838,13 +895,48 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         let class_lookup: HashMap<String, Class> =
             class_details_map().into_iter().map(|(id, detail)| (id, detail.class)).collect();
         let combined_class_skills = multiclass_class_skill_grants(&classes.get(), &class_lookup);
-        let background_skills = background_detail
+        let background_skills: Vec<(String, SkillGrant)> = background_detail
             .get()
             .and_then(|result| result.ok())
             .flatten()
-            .map(|b| b.skills.clone())
+            .map(|b| b.skills.iter().cloned().map(|grant| (b.name.clone(), grant)).collect())
             .unwrap_or_default();
         skill_slots(&combined_class_skills, &background_skills)
+    });
+    let skill_proficiency_sources = Memo::new(move |_| -> Vec<(String, Vec<String>)> {
+        let class_lookup: HashMap<String, Class> =
+            class_details_map().into_iter().map(|(id, detail)| (id, detail.class)).collect();
+        let combined_class_skills = multiclass_class_skill_grants(&classes.get(), &class_lookup);
+        let background_skills: Vec<(String, SkillGrant)> = background_detail
+            .get()
+            .and_then(|result| result.ok())
+            .flatten()
+            .map(|b| b.skills.iter().cloned().map(|grant| (b.name.clone(), grant)).collect())
+            .unwrap_or_default();
+
+        let mut sources: HashMap<String, Vec<String>> = HashMap::new();
+        for (source, grant) in combined_class_skills.iter().chain(background_skills.iter()) {
+            if let SkillGrant::Fixed { skills } = grant {
+                for skill in skills {
+                    let entry = sources.entry(skill.clone()).or_default();
+                    if !entry.contains(source) {
+                        entry.push(source.clone());
+                    }
+                }
+            }
+        }
+        let slots = skill_inputs.get();
+        for (choice, pool) in skill_choices.get().iter().zip(slots.choice_pools.iter()) {
+            if let Some(skill) = choice {
+                let entry = sources.entry(skill.clone()).or_default();
+                if !entry.contains(&pool.source) {
+                    entry.push(pool.source.clone());
+                }
+            }
+        }
+        let mut rows: Vec<(String, Vec<String>)> = sources.into_iter().collect();
+        rows.sort_by(|a, b| skill_label(&a.0).cmp(&skill_label(&b.0)));
+        rows
     });
     let background_ready = move || match background_id.get() {
         None => true,
@@ -897,7 +989,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                 // redundant (now covered by a fixed grant) — matches
                 // `skill_slot`'s disabling of already-fixed options, rather
                 // than leaving a now-wasted pick silently selected.
-                if choice.as_ref().is_some_and(|skill| !pool.contains(skill) || slots.fixed.contains(skill)) {
+                if choice.as_ref().is_some_and(|skill| !pool.options.contains(skill) || slots.fixed.contains(skill)) {
                     *choice = None;
                 }
             }
@@ -1005,6 +1097,62 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             .and_then(|list| list.into_iter().find(|(id, _)| id == class_id).map(|(_, spells)| spells))
             .unwrap_or_default()
     };
+
+    let spell_choice_pools_all: Resource<
+        Result<(Vec<EntryKey>, Vec<(String, String, Vec<(u8, Vec<Spell>)>)>), ServerFnError>,
+    > = Resource::new(
+        move || resolved_entries.get(),
+        |entries| async move {
+            let mut out = Vec::new();
+            for e in entries.iter().filter(|e| e.subclass.is_some()) {
+                let subclass = e.subclass.as_ref().unwrap();
+                let pools = get_subclass_spell_choice_pools(subclass.id.clone(), e.entry.level).await?;
+                if !pools.is_empty() {
+                    out.push((e.entry.class_id.clone(), subclass.name.clone(), pools));
+                }
+            }
+            let key = entries.iter().map(entry_key).collect();
+            Ok((key, out))
+        },
+    );
+    let spell_choice_pools_ready = move || {
+        let expected: Vec<EntryKey> = resolved_entries.get().iter().map(entry_key).collect();
+        spell_choice_pools_all.get().and_then(|r| r.ok()).is_some_and(|(keyed, _)| keyed == expected)
+    };
+    let spell_choice_slots = Memo::new(move |_| -> Vec<SpellChoiceSlot> {
+        spell_choice_pools_all
+            .get()
+            .and_then(|r| r.ok())
+            .map(|(_, list)| list)
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|(class_id, source, pools)| {
+                pools.into_iter().filter(|(_, spells)| !spells.is_empty()).flat_map(move |(count, spells)| {
+                    let class_id = class_id.clone();
+                    let source = source.clone();
+                    (0..count).map(move |_| SpellChoiceSlot {
+                        class_id: class_id.clone(),
+                        source: source.clone(),
+                        options: spells.clone(),
+                    })
+                })
+            })
+            .collect()
+    });
+    Effect::new(move |_| {
+        if !spell_choice_pools_ready() {
+            return;
+        }
+        let slots = spell_choice_slots.get();
+        spell_grant_choices.update(|choices| {
+            choices.resize(slots.len(), None);
+            for (choice, slot) in choices.iter_mut().zip(slots.iter()) {
+                if choice.as_ref().is_some_and(|id| !slot.options.iter().any(|s| &s.id == id)) {
+                    *choice = None;
+                }
+            }
+        });
+    });
 
     // Each caster class's own known/prepared spell and cantrip count,
     // against its own level and its own spellcasting ability score —
@@ -1121,6 +1269,13 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             }
             for spell in granted_spells_for(&entry.entry.class_id) {
                 names.insert(spell.name.to_lowercase());
+            }
+        }
+        for (choice, slot) in spell_grant_choices.get().iter().zip(spell_choice_slots.get().iter()) {
+            if let Some(id) = choice {
+                if let Some(spell) = slot.options.iter().find(|s| &s.id == id) {
+                    names.insert(spell.name.to_lowercase());
+                }
             }
         }
         names
@@ -1375,6 +1530,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         7 => {
             cantrip_choices.get().len() == total_cantrips_required()
                 && spell_choices.get().len() == total_spells_required()
+                && spell_grant_choices.get().len() == spell_choice_slots.get().len()
+                && spell_grant_choices.get().iter().all(Option::is_some)
         }
         8 => {
             asi_choices.get().len() == asi_entries.get().len()
@@ -1456,7 +1613,13 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                     {move || match step.get() {
                         0 => basics_step(name, char_level, enforce_prereqs).into_any(),
                         1 => {
-                            class_step(classes, class_list, class_details, current_final_abilities, enforce_prereqs)
+                            class_step(
+                                    classes,
+                                    class_list,
+                                    class_details,
+                                    current_final_abilities,
+                                    enforce_prereqs,
+                                )
                                 .into_any()
                         }
                         2 => {
@@ -1488,6 +1651,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                                     skill_choices,
                                     expertise_slot_count,
                                     expertise_choices,
+                                    skill_proficiency_sources,
                                 )
                                 .into_any()
                         }
@@ -1511,11 +1675,19 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                                     cantrip_choices,
                                     spell_choices,
                                     spells_class_tab,
+                                    spell_choice_slots,
+                                    spell_grant_choices,
                                 )
                                 .into_any()
                         }
                         8 => {
-                            asi_step(resolved_entries, asi_entries, asi_choices, feat_list, asi_class_tab)
+                            asi_step(
+                                    resolved_entries,
+                                    asi_entries,
+                                    asi_choices,
+                                    feat_list,
+                                    asi_class_tab,
+                                )
                                 .into_any()
                         }
                         _ => {
@@ -1593,8 +1765,12 @@ fn basics_step(name: RwSignal<String>, char_level: Memo<u8>, enforce_prereqs: Rw
         </label>
         <div class="flex flex-col gap-1">
             <span class="label-text">"Total level"</span>
-            <span class="font-mono text-2xl">{move || format!("{:02} / 20", char_level.get())}</span>
-            <span class="text-xs opacity-70">"Set on the Class step — add a class there to begin."</span>
+            <span class="font-mono text-2xl">
+                {move || format!("{:02} / 20", char_level.get())}
+            </span>
+            <span class="text-xs opacity-70">
+                "Set on the Class step — add a class there to begin."
+            </span>
         </div>
         <div class="flex flex-col gap-1">
             <span class="label-text">"Multiclass ability prerequisites"</span>
@@ -1605,7 +1781,11 @@ fn basics_step(name: RwSignal<String>, char_level: Memo<u8>, enforce_prereqs: Rw
                             <a
                                 role="tab"
                                 class=move || {
-                                    if enforce_prereqs.get() == value { "tab tab-active" } else { "tab" }
+                                    if enforce_prereqs.get() == value {
+                                        "tab tab-active"
+                                    } else {
+                                        "tab"
+                                    }
                                 }
                                 on:click=move |_| enforce_prereqs.set(value)
                             >
@@ -1659,66 +1839,93 @@ fn class_step(
 
     view! {
         <h2 class="card-title">"Classes"</h2>
-        <span class="font-mono text-sm opacity-80">{move || format!("TOTAL LEVEL {:02} / 20", total())}</span>
+        <span class="font-mono text-sm opacity-80">
+            {move || format!("TOTAL LEVEL {:02} / 20", total())}
+        </span>
 
         <div class="flex flex-col gap-3">
             <For
-                each=move || classes.get().into_iter().enumerate().map(|(i, c)| (c.class_id.clone(), i))
+                each=move || {
+                    classes.get().into_iter().enumerate().map(|(i, c)| (c.class_id.clone(), i))
+                }
                 key=|(class_id, _)| class_id.clone()
                 children=move |(row_class_id, _)| {
                     let row_id = row_class_id.clone();
-                    let position = move || classes.get().iter().position(|c| c.class_id == row_id).unwrap_or(0);
+                    let position = move || {
+                        classes.get().iter().position(|c| c.class_id == row_id).unwrap_or(0)
+                    };
                     let row_id = row_class_id.clone();
                     let current_level = move || {
-                        classes.get().iter().find(|c| c.class_id == row_id).map(|c| c.level).unwrap_or(1)
+                        classes
+                            .get()
+                            .iter()
+                            .find(|c| c.class_id == row_id)
+                            .map(|c| c.level)
+                            .unwrap_or(1)
                     };
                     let row_id = row_class_id.clone();
                     let current_subclass_id = move || {
-                        classes.get().into_iter().find(|c| c.class_id == row_id).and_then(|c| c.subclass_id)
+                        classes
+                            .get()
+                            .into_iter()
+                            .find(|c| c.class_id == row_id)
+                            .and_then(|c| c.subclass_id)
                     };
                     let row_id = row_class_id.clone();
                     let detail = move || details_map().get(&row_id).cloned();
-
                     let dec_id = row_class_id.clone();
                     let dec_click = move |_: leptos::ev::MouseEvent| {
-                        classes.update(|list| {
-                            if let Some(entry) = list.iter_mut().find(|c| c.class_id == dec_id) {
-                                entry.level = entry.level.saturating_sub(1).max(1);
-                            }
-                        });
+                        classes
+                            .update(|list| {
+                                if let Some(entry) = list.iter_mut().find(|c| c.class_id == dec_id)
+                                {
+                                    entry.level = entry.level.saturating_sub(1).max(1);
+                                }
+                            });
                     };
                     let inc_id = row_class_id.clone();
                     let inc_click = move |_: leptos::ev::MouseEvent| {
-                        classes.update(|list| {
-                            if let Some(entry) = list.iter_mut().find(|c| c.class_id == inc_id) {
-                                entry.level = (entry.level + 1).min(20);
-                            }
-                        });
+                        classes
+                            .update(|list| {
+                                if let Some(entry) = list.iter_mut().find(|c| c.class_id == inc_id)
+                                {
+                                    entry.level = (entry.level + 1).min(20);
+                                }
+                            });
                     };
                     let remove_id = row_class_id.clone();
                     let remove_click = move |_: leptos::ev::MouseEvent| {
                         classes.update(|list| list.retain(|c| c.class_id != remove_id));
                     };
                     let subclass_row_id = row_class_id.clone();
-
                     let detail_for_name = detail.clone();
                     let detail_for_subclass = detail.clone();
                     let detail_for_prereq_warning = detail.clone();
                     let current_level_for_dec = current_level.clone();
                     let current_level_for_display = current_level.clone();
                     let current_level_for_subclass = current_level.clone();
+                    let maxed_out = move || total() >= 20;
+
                     // A literal `>=` inside a `view!` attribute expression
                     // confuses the macro's tag scanner (it reads the bare `>`
                     // as closing the element early) — named boolean signals
                     // sidestep the parser entirely, same fix as the on:click
                     // handlers above.
-                    let maxed_out = move || total() >= 20;
 
                     view! {
-                        <div class=move || format!("class-band {} flex flex-col gap-2 p-3 border border-base-300 rounded-box bg-base-200/40", class_band_class(position()))>
+                        <div class=move || {
+                            format!(
+                                "class-band {} flex flex-col gap-2 p-3 border border-base-300 rounded-box bg-base-200/40",
+                                class_band_class(position()),
+                            )
+                        }>
                             <div class="flex items-center gap-3 flex-wrap">
                                 <span class="font-display text-lg flex-1 min-w-40">
-                                    {move || detail_for_name().map(|d| d.class.name.clone()).unwrap_or_else(|| "Loading...".to_string())}
+                                    {move || {
+                                        detail_for_name()
+                                            .map(|d| d.class.name.clone())
+                                            .unwrap_or_else(|| "Loading...".to_string())
+                                    }}
                                 </span>
                                 <div class="join">
                                     <button
@@ -1783,18 +1990,24 @@ fn class_step(
                                                             let row_id = row_id.clone();
                                                             let click_row_id = row_id.clone();
                                                             let sub_click = move |_: leptos::ev::MouseEvent| {
-                                                                classes.update(|list| {
-                                                                    if let Some(entry) = list.iter_mut().find(|c| c.class_id == click_row_id) {
-                                                                        entry.subclass_id = Some(sub_id.clone());
-                                                                    }
-                                                                });
+                                                                classes
+                                                                    .update(|list| {
+                                                                        if let Some(entry) = list
+                                                                            .iter_mut()
+                                                                            .find(|c| c.class_id == click_row_id)
+                                                                        {
+                                                                            entry.subclass_id = Some(sub_id.clone());
+                                                                        }
+                                                                    });
                                                             };
                                                             let current_subclass_id = current_subclass_id.clone();
                                                             view! {
                                                                 <button
                                                                     type="button"
                                                                     class=move || {
-                                                                        if current_subclass_id().as_deref() == Some(selected.as_str()) {
+                                                                        if current_subclass_id().as_deref()
+                                                                            == Some(selected.as_str())
+                                                                        {
                                                                             "btn btn-sm btn-primary"
                                                                         } else {
                                                                             "btn btn-sm btn-outline"
@@ -1834,7 +2047,11 @@ fn class_step(
             {move || Suspend::new(async move {
                 match class_list.await {
                     Ok(rows) => {
-                        let added: HashSet<String> = classes.get().iter().map(|c| c.class_id.clone()).collect();
+                        let added: HashSet<String> = classes
+                            .get()
+                            .iter()
+                            .map(|c| c.class_id.clone())
+                            .collect();
                         let maxed = total() >= 20;
                         view! {
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1849,21 +2066,27 @@ fn class_step(
                                             .map(|code| ability_label(code))
                                             .collect::<Vec<_>>()
                                             .join(", ");
-                                        let prereqs = class.multiclass_ability_prerequisites.clone();
-                                        let warning = move || unmet_prereq_label(&prereqs, !classes.get().is_empty());
+                                        let prereqs = class
+                                            .multiclass_ability_prerequisites
+                                            .clone();
+                                        let warning = move || unmet_prereq_label(
+                                            &prereqs,
+                                            !classes.get().is_empty(),
+                                        );
                                         view! {
                                             <button
                                                 type="button"
                                                 class="btn btn-outline justify-start h-auto py-2 flex-col items-start w-full"
                                                 disabled=maxed
                                                 on:click=move |_| {
-                                                    classes.update(|list| {
-                                                        list.push(ClassLevel {
-                                                            class_id: id.clone(),
-                                                            subclass_id: None,
-                                                            level: 1,
+                                                    classes
+                                                        .update(|list| {
+                                                            list.push(ClassLevel {
+                                                                class_id: id.clone(),
+                                                                subclass_id: None,
+                                                                level: 1,
+                                                            });
                                                         });
-                                                    });
                                                 }
                                             >
                                                 <span class="text-base">
@@ -1872,7 +2095,12 @@ fn class_step(
                                                 <span class="text-xs font-normal opacity-70">
                                                     {format!("d{} · Saves: {}", class.hit_die, saves)}
                                                 </span>
-                                                {move || warning().map(|label| view! { <span class="text-warning text-xs">{label}</span> })}
+                                                {move || {
+                                                    warning()
+                                                        .map(|label| {
+                                                            view! { <span class="text-warning text-xs">{label}</span> }
+                                                        })
+                                                }}
                                             </button>
                                         }
                                     })
@@ -1976,7 +2204,8 @@ fn species_step(
                 >
                     {move || match species_list.get() {
                         None => {
-                            view! { <li class="p-2 text-sm opacity-60">"Loading..."</li> }.into_any()
+                            view! { <li class="p-2 text-sm opacity-60">"Loading..."</li> }
+                                .into_any()
                         }
                         Some(Err(err)) => {
                             view! {
@@ -1987,7 +2216,8 @@ fn species_step(
                                 .into_any()
                         }
                         Some(Ok(rows)) if rows.is_empty() => {
-                            view! { <li class="p-2 text-sm opacity-60">"No matches."</li> }.into_any()
+                            view! { <li class="p-2 text-sm opacity-60">"No matches."</li> }
+                                .into_any()
                         }
                         Some(Ok(rows)) => {
                             group_species_by_name(rows)
@@ -1996,7 +2226,8 @@ fn species_step(
                                     if variants.len() <= 1 {
                                         let species = variants.into_iter().next().unwrap();
                                         let label = species.name.clone();
-                                        species_row(species, label, species_id, focused_species).into_any()
+                                        species_row(species, label, species_id, focused_species)
+                                            .into_any()
                                     } else {
                                         species_group_accordion(
                                                 name,
@@ -2126,7 +2357,11 @@ fn species_group_accordion(
                                             .get_value()
                                             .into_iter()
                                             .map(|species| {
-                                                let label = format!("{} ({})", species.name, species.source);
+                                                let label = format!(
+                                                    "{} ({})",
+                                                    species.name,
+                                                    species.source,
+                                                );
                                                 species_row(species, label, species_id, focused_species)
                                             })
                                             .collect_view()}
@@ -2170,7 +2405,10 @@ fn background_step(
                     on:mouseleave=move |_| focused_background.set(selected_background())
                 >
                     {move || match background_list.get() {
-                        None => view! { <li class="p-2 text-sm opacity-60">"Loading..."</li> }.into_any(),
+                        None => {
+                            view! { <li class="p-2 text-sm opacity-60">"Loading..."</li> }
+                                .into_any()
+                        }
                         Some(Err(err)) => {
                             view! {
                                 <li class="p-2 text-sm text-error">
@@ -2180,7 +2418,8 @@ fn background_step(
                                 .into_any()
                         }
                         Some(Ok(rows)) if rows.is_empty() => {
-                            view! { <li class="p-2 text-sm opacity-60">"No matches."</li> }.into_any()
+                            view! { <li class="p-2 text-sm opacity-60">"No matches."</li> }
+                                .into_any()
                         }
                         Some(Ok(rows)) => {
                             rows.into_iter()
@@ -2192,7 +2431,11 @@ fn background_step(
                                     let click_id = background.id.clone();
                                     let hover_background = background.clone();
                                     let click_background = background.clone();
-                                    let title = format!("{} ({})", background.name, background.source);
+                                    let title = format!(
+                                        "{} ({})",
+                                        background.name,
+                                        background.source,
+                                    );
                                     let subtitle = if background.skills.is_empty() {
                                         "\u{2014}".to_string()
                                     } else {
@@ -2231,7 +2474,9 @@ fn background_step(
             </div>
             <div class="flex-1 w-full lg:sticky lg:top-4">
                 {move || match focused_background.get() {
-                    Some(background) => view! { <BackgroundDetailCard background=background /> }.into_any(),
+                    Some(background) => {
+                        view! { <BackgroundDetailCard background=background /> }.into_any()
+                    }
                     None => {
                         detail_panel_placeholder("Hover or select a background to see its details.")
                             .into_any()
@@ -2461,9 +2706,6 @@ fn abilities_step(
             if ability_bonus_source.get() != AbilityBonusSource::Custom {
                 return None;
             }
-            // Disabled once picked in the other slot — a repeated code isn't
-            // meaningful here, unlike `AsiChoice::Abilities`'s "same twice
-            // for +2" (see `apply_custom_species_bonus`'s doc comment).
             let is_disabled = move |position: usize, code: &'static str| {
                 custom_ability_bonus_choices
                     .get()
@@ -2474,6 +2716,9 @@ fn abilities_step(
             let custom_ability_select = move |position: usize, label: &'static str| {
                 let codes = custom_ability_bonus_choices.get();
                 let current = codes.get(position).cloned().unwrap_or_else(|| "str".to_string());
+                // Disabled once picked in the other slot — a repeated code isn't
+                // meaningful here, unlike `AsiChoice::Abilities`'s "same twice
+                // for +2" (see `apply_custom_species_bonus`'s doc comment).
                 view! {
                     <div class="flex flex-col gap-1">
                         <span class="text-xs opacity-70">{label}</span>
@@ -2719,8 +2964,6 @@ fn asi_step(
         <h2 class="card-title">"Feats & Ability Score Improvements"</h2>
         {move || {
             let entries = resolved_entries.get();
-            // Global slot position (indexes the flat `asi_choices` vec)
-            // alongside which resolved entry granted it and at what level.
             let indexed_slots: Vec<(usize, usize, u8)> = asi_entries
                 .get()
                 .into_iter()
@@ -2728,14 +2971,15 @@ fn asi_step(
                 .map(|(slot, (entry_index, _, slot_level))| (slot, entry_index, slot_level))
                 .collect();
             if indexed_slots.is_empty() {
-                return view! {
+                return // Global slot position (indexes the flat `asi_choices` vec)
+                // alongside which resolved entry granted it and at what level.
+                view! {
                     <p class="text-sm opacity-70">
                         "No improvement slots at this level — most classes unlock their first at level 4."
                     </p>
                 }
                     .into_any();
             }
-            // Only tab classes that actually have an unlocked slot.
             let tab_entries: Vec<ResolvedClassEntry> = entries
                 .into_iter()
                 .filter(|e| indexed_slots.iter().any(|(_, entry_index, _)| *entry_index == e.index))
@@ -2749,6 +2993,7 @@ fn asi_step(
             }
             let active = asi_class_tab.get().min(tab_entries.len().saturating_sub(1));
             let active_entry = &tab_entries[active];
+            // Only tab classes that actually have an unlocked slot.
             view! {
                 <div role="tablist" class="tabs tabs-boxed tabs-sm w-fit">
                     {tab_entries
@@ -3033,9 +3278,45 @@ fn skills_step(
     skill_choices: RwSignal<Vec<Option<String>>>,
     expertise_slot_count: Memo<usize>,
     expertise_choices: RwSignal<Vec<Option<String>>>,
+    skill_proficiency_sources: Memo<Vec<(String, Vec<String>)>>,
 ) -> impl IntoView {
     view! {
         <h2 class="card-title">"Skill Proficiencies"</h2>
+        {move || {
+            let rows = skill_proficiency_sources.get();
+            (!rows.is_empty())
+                .then(|| {
+                    view! {
+                        <div class="card bg-base-200 border border-base-300">
+                            <div class="card-body py-3 gap-2">
+                                <h3 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
+                                    "Current Proficiencies"
+                                </h3>
+                                <div class="flex flex-wrap gap-2">
+                                    {rows
+                                        .into_iter()
+                                        .map(|(skill, sources)| {
+                                            let label = skill_label(&skill);
+                                            let source_text = sources.join(", ");
+                                            view! {
+                                                <span
+                                                    class="badge badge-outline gap-1"
+                                                    title=source_text.clone()
+                                                >
+                                                    {label}
+                                                    <span class="opacity-60 text-xs">
+                                                        {format!("({source_text})")}
+                                                    </span>
+                                                </span>
+                                            }
+                                        })
+                                        .collect_view()}
+                                </div>
+                            </div>
+                        </div>
+                    }
+                })
+        }}
         {move || {
             (skill_inputs.get().choice_pools.is_empty())
                 .then(|| {
@@ -3075,7 +3356,7 @@ fn skills_step(
 
 fn skill_slot(
     slot: usize,
-    pool: Vec<String>,
+    pool: SkillChoicePool,
     skill_inputs: Memo<SkillSlots>,
     skill_choices: RwSignal<Vec<Option<String>>>,
 ) -> impl IntoView {
@@ -3098,10 +3379,11 @@ fn skill_slot(
                 .enumerate()
                 .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt))
     };
+    let heading = format!("{}: skill choice", pool.source);
 
     view! {
         <div class="flex flex-col gap-1 p-3 border border-base-300 rounded-box">
-            <span class="font-semibold text-sm">{format!("Skill choice {}", slot + 1)}</span>
+            <span class="font-semibold text-sm">{heading}</span>
             <select
                 class="select select-bordered select-sm w-64"
                 on:change=move |ev| {
@@ -3113,6 +3395,7 @@ fn skill_slot(
                     "— choose —"
                 </option>
                 {pool
+                    .options
                     .into_iter()
                     .map(|opt| {
                         let value = opt.clone();
@@ -3212,6 +3495,8 @@ fn spells_step(
     cantrip_choices: RwSignal<Vec<String>>,
     spell_choices: RwSignal<Vec<String>>,
     spells_class_tab: RwSignal<usize>,
+    spell_choice_slots: Memo<Vec<SpellChoiceSlot>>,
+    spell_grant_choices: RwSignal<Vec<Option<String>>>,
 ) -> impl IntoView {
     // Local to this step (not lifted to CharacterBuilderPage) — same "focused
     // detail" role `selected_spell` plays on the compendium Spells page, just
@@ -3290,8 +3575,11 @@ fn spells_step(
                         let Some(class_id) = active_class_id.get() else { return ().into_any() };
                         match granted_spells_all.await {
                             Ok(list) => {
-                                let spells =
-                                    list.into_iter().find(|(id, _)| *id == class_id).map(|(_, s)| s).unwrap_or_default();
+                                let spells = list
+                                    .into_iter()
+                                    .find(|(id, _)| *id == class_id)
+                                    .map(|(_, s)| s)
+                                    .unwrap_or_default();
                                 if spells.is_empty() {
                                     return ().into_any();
                                 }
@@ -3301,7 +3589,10 @@ fn spells_step(
                                     .collect::<Vec<_>>()
                                     .join(", ");
                                 view! {
-                                    <div role="alert" class="alert alert-info alert-soft text-sm py-2">
+                                    <div
+                                        role="alert"
+                                        class="alert alert-info alert-soft text-sm py-2"
+                                    >
                                         <span>
                                             {format!(
                                                 "Your subclass automatically gives you these — always prepared, not shown below: {names}",
@@ -3315,6 +3606,28 @@ fn spells_step(
                         }
                     })}
                 </Suspense>
+                <For
+                    each=move || {
+                        let Some(class_id) = active_class_id.get() else { return Vec::new() };
+                        spell_choice_slots
+                            .get()
+                            .into_iter()
+                            .enumerate()
+                            .filter(|(_, slot)| slot.class_id == class_id)
+                            .collect::<Vec<_>>()
+                    }
+                    key=|(slot, _)| *slot
+                    children=move |(slot, choice_slot)| {
+                        spell_choice_slot(
+                            slot,
+                            choice_slot,
+                            spell_grant_choices,
+                            cantrip_choices,
+                            spell_choices,
+                            focused_spell,
+                        )
+                    }
+                />
                 <Suspense fallback=move || {
                     view! { <p>"Loading spells..."</p> }
                 }>
@@ -3322,8 +3635,11 @@ fn spells_step(
                         let Some(class_id) = active_class_id.get() else { return ().into_any() };
                         match spell_options_all.await {
                             Ok((_, list)) => {
-                                let spells =
-                                    list.into_iter().find(|(id, _)| *id == class_id).map(|(_, s)| s).unwrap_or_default();
+                                let spells = list
+                                    .into_iter()
+                                    .find(|(id, _)| *id == class_id)
+                                    .map(|(_, s)| s)
+                                    .unwrap_or_default();
                                 let cantrips: Vec<Spell> = spells
                                     .iter()
                                     .filter(|spell| spell.level == 0)
@@ -3359,7 +3675,9 @@ fn spells_step(
                             }
                             Err(err) => {
                                 view! {
-                                    <p class="text-error">{format!("Failed to load spells: {err}")}</p>
+                                    <p class="text-error">
+                                        {format!("Failed to load spells: {err}")}
+                                    </p>
                                 }
                                     .into_any()
                             }
@@ -3371,7 +3689,8 @@ fn spells_step(
                 {move || match focused_spell.get() {
                     Some(spell) => view! { <SpellDetailCard spell=spell /> }.into_any(),
                     None => {
-                        detail_panel_placeholder("Hover or select a spell to see its details.").into_any()
+                        detail_panel_placeholder("Hover or select a spell to see its details.")
+                            .into_any()
                     }
                 }}
             </div>
@@ -3484,10 +3803,6 @@ fn optional_features_step(
                         .position(|other| other == t)
                         .unwrap_or(usize::MAX)
                 });
-            // A single checklist alone in the list column leaves the fixed-width
-            // panel looking stranded in a sea of empty space, so it only grows
-            // to fill the row (list column shrinks to its content's natural
-            // width instead) once there's just one list to show it next to.
             let (grid_class, list_wrapper_class, panel_wrapper_class) = if types.len() >= 2 {
                 (
                     "grid grid-cols-1 md:grid-cols-2 gap-4",
@@ -3502,6 +3817,10 @@ fn optional_features_step(
                 )
             };
             let class_id = entry.entry.class_id.clone();
+            // A single checklist alone in the list column leaves the fixed-width
+            // panel looking stranded in a sea of empty space, so it only grows
+            // to fill the row (list column shrinks to its content's natural
+            // width instead) once there's just one list to show it next to.
             view! {
                 <div class="flex flex-col lg:flex-row gap-4 items-start">
                     <div class=list_wrapper_class>
@@ -3807,10 +4126,7 @@ fn spell_choice_chip(
                 focused_spell.set(Some(click_spell.clone()));
                 choices
                     .update(|list| {
-                        if let Some(pos) = list
-                            .iter()
-                            .position(|picked| *picked == id_for_toggle)
-                        {
+                        if let Some(pos) = list.iter().position(|picked| *picked == id_for_toggle) {
                             list.remove(pos);
                         } else {
                             list.push(id_for_toggle.clone());
@@ -3821,6 +4137,84 @@ fn spell_choice_chip(
             <span>{name}</span>
             <span class="text-xs font-normal opacity-70">{subtitle}</span>
         </button>
+    }
+}
+
+/// One labelled dropdown for a subclass spell grant slot — same shape as `skill_slot`.
+fn spell_choice_slot(
+    slot: usize,
+    choice_slot: SpellChoiceSlot,
+    spell_grant_choices: RwSignal<Vec<Option<String>>>,
+    cantrip_choices: RwSignal<Vec<String>>,
+    spell_choices: RwSignal<Vec<String>>,
+    focused_spell: RwSignal<Option<Spell>>,
+) -> impl IntoView {
+    let choice = move || spell_grant_choices.get().get(slot).cloned().flatten();
+    let set_choice = move |value: Option<String>| {
+        spell_grant_choices.update(|choices| {
+            if let Some(entry) = choices.get_mut(slot) {
+                *entry = value;
+            }
+        });
+    };
+    let level_label = choice_slot
+        .options
+        .first()
+        .map(|s| if s.level == 0 { "cantrip".to_string() } else { format!("level {} spell", s.level) })
+        .unwrap_or_else(|| "spell".to_string());
+    let heading = format!("{}: choose a {level_label}", choice_slot.source);
+    let options = choice_slot.options;
+    let focus_options = options.clone();
+    let is_disabled = move |spell_id: &str| {
+        spell_grant_choices
+            .get()
+            .iter()
+            .enumerate()
+            .any(|(i, picked)| i != slot && picked.as_deref() == Some(spell_id))
+            || cantrip_choices.get().iter().any(|id| id == spell_id)
+            || spell_choices.get().iter().any(|id| id == spell_id)
+    };
+
+    view! {
+        <div class="flex flex-col gap-1 p-3 border border-base-300 rounded-box">
+            <span class="font-semibold text-sm">{heading}</span>
+            <select
+                class="select select-bordered select-sm w-64"
+                on:change=move |ev| {
+                    let value = event_target_value(&ev);
+                    set_choice(if value.is_empty() { None } else { Some(value) });
+                }
+                on:focus=move |_| {
+                    if let Some(picked) = choice() {
+                        focused_spell.set(focus_options.iter().find(|s| s.id == picked).cloned());
+                    }
+                }
+            >
+                <option value="" selected=move || choice().is_none()>
+                    "— choose —"
+                </option>
+                {options
+                    .into_iter()
+                    .map(|spell| {
+                        let value = spell.id.clone();
+                        let label = spell.name.clone();
+                        let selected_id = spell.id.clone();
+                        let disabled_id = spell.id.clone();
+                        let hover_spell = spell.clone();
+                        view! {
+                            <option
+                                value=value
+                                selected=move || choice().as_deref() == Some(selected_id.as_str())
+                                disabled=move || is_disabled(&disabled_id)
+                                on:mouseenter=move |_| focused_spell.set(Some(hover_spell.clone()))
+                            >
+                                {label}
+                            </option>
+                        }
+                    })
+                    .collect_view()}
+            </select>
+        </div>
     }
 }
 
@@ -3941,34 +4335,53 @@ fn review_step(
             let finals = final_abilities(&character, species.as_ref());
             let con_mod = ability_modifier(finals[2].1);
             let dex_mod = ability_modifier(finals[1].1);
-            // One hit die per level, in the same order save_character
-            // re-derives server-side: primary class first (its own level 1
-            // is never rolled), then every later class's own levels.
             let hit_die = entries.first().map(|e| e.detail.class.hit_die).unwrap_or(8);
-            let hit_dice: HashMap<String, u8> =
-                entries.iter().map(|e| (e.entry.class_id.clone(), e.detail.class.hit_die)).collect();
-            let hp = (!hit_dice.is_empty()).then(|| resolved_hp_max_multiclass(&character, &hit_dice, con_mod));
+            let hit_dice: HashMap<String, u8> = entries
+                .iter()
+                .map(|e| (e.entry.class_id.clone(), e.detail.class.hit_die))
+                .collect();
+            let hp = (!hit_dice.is_empty())
+                .then(|| resolved_hp_max_multiclass(&character, &hit_dice, con_mod));
             let slot_hit_dice: Vec<u8> = entries
                 .iter()
                 .enumerate()
                 .flat_map(|(index, e)| {
-                    let levels = if index == 0 { e.entry.level.saturating_sub(1) } else { e.entry.level };
+                    let levels = if index == 0 {
+                        e.entry.level.saturating_sub(1)
+                    } else {
+                        e.entry.level
+                    };
                     std::iter::repeat(e.detail.class.hit_die).take(levels as usize)
                 })
                 .collect();
-            let class_lookup: HashMap<String, Class> =
-                entries.iter().map(|e| (e.entry.class_id.clone(), e.detail.class.clone())).collect();
-            let prereq_violations = multiclass_prereq_violations(&character, &class_lookup, species.as_ref());
-            let validation = character.validate().and_then(|()| {
-                if prereq_violations.is_empty() { Ok(()) } else { Err(prereq_violations.join("; ")) }
-            });
+            let class_lookup: HashMap<String, Class> = entries
+                .iter()
+                .map(|e| (e.entry.class_id.clone(), e.detail.class.clone()))
+                .collect();
+            let prereq_violations = multiclass_prereq_violations(
+                &character,
+                &class_lookup,
+                species.as_ref(),
+            );
+            let validation = character
+                .validate()
+                .and_then(|()| {
+                    if prereq_violations.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(prereq_violations.join("; "))
+                    }
+                });
             let summary = review_summary();
-            // Every applicable-but-unfinished step, in step order — locked
-            // steps (nothing to pick yet) don't count against completeness.
             let incomplete_steps: Vec<(usize, &'static str)> = (0..STEPS.len() - 1)
                 .filter(|&i| step_lock_reason(i).is_none() && !step_complete(i))
                 .map(|i| (i, STEPS[i]))
                 .collect();
+            // One hit die per level, in the same order save_character
+            // re-derives server-side: primary class first (its own level 1
+            // is never rolled), then every later class's own levels.
+            // Every applicable-but-unfinished step, in step order — locked
+            // steps (nothing to pick yet) don't count against completeness.
 
             view! {
                 <div class="flex flex-col gap-1">
@@ -4020,7 +4433,11 @@ fn review_step(
                                     <a
                                         role="tab"
                                         class=move || {
-                                            if hp_method.get() == method { "tab tab-active" } else { "tab" }
+                                            if hp_method.get() == method {
+                                                "tab tab-active"
+                                            } else {
+                                                "tab"
+                                            }
                                         }
                                         on:click=move |_| hp_method.set(method)
                                     >
@@ -4043,7 +4460,9 @@ fn review_step(
                             view! {
                                 <div class="flex flex-col gap-2">
                                     <p class="text-xs opacity-70">
-                                        {format!("Level 1: {level1} (max d{hit_die} + Constitution modifier)")}
+                                        {format!(
+                                            "Level 1: {level1} (max d{hit_die} + Constitution modifier)",
+                                        )}
                                     </p>
                                     <div class="flex flex-wrap gap-3">
                                         {(2..=total_level(&character.classes))
@@ -4062,9 +4481,7 @@ fn review_step(
                                                                 hp_rolls.get().get(idx).copied().unwrap_or(0).to_string()
                                                             }
                                                             on:input=move |ev| {
-                                                                if let Ok(value) = event_target_value(&ev)
-                                                                    .parse::<u8>()
-                                                                {
+                                                                if let Ok(value) = event_target_value(&ev).parse::<u8>() {
                                                                     hp_rolls
                                                                         .update(|rolls| {
                                                                             if let Some(slot) = rolls.get_mut(idx) {

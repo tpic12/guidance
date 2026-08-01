@@ -62,6 +62,19 @@ pub async fn get_subclass_granted_spells(
         .map_err(|err| ServerFnError::new(err.to_string()))
 }
 
+#[server]
+pub async fn get_subclass_spell_choice_pools(
+    subclass_id: String,
+    level: u8,
+) -> Result<Vec<(u8, Vec<Spell>)>, ServerFnError> {
+    use sqlx::SqlitePool;
+
+    let pool = expect_context::<SqlitePool>();
+    crate::db::get_subclass_spell_choice_pools(&pool, &subclass_id, level)
+        .await
+        .map_err(|err| ServerFnError::new(err.to_string()))
+}
+
 #[component]
 pub fn SpellsPage() -> impl IntoView {
     let search = RwSignal::new(String::new());

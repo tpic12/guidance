@@ -39,7 +39,7 @@ fn spell_from_raw(raw: RawSpell) -> anyhow::Result<Spell> {
     })
 }
 
-fn school_from_code(code: &str) -> anyhow::Result<School> {
+pub(crate) fn school_from_code(code: &str) -> anyhow::Result<School> {
     Ok(match code {
         "A" => School::Abjuration,
         "C" => School::Conjuration,
