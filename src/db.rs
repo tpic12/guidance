@@ -212,13 +212,8 @@ pub async fn get_subclass_granted_spells(
         .collect()
 }
 
-/// Spell choice-pools a subclass's `{"choose": ...}` grants (Cleric Nature/
-/// Death/Arcana Domain's free cantrip/spell picks — see `SpellChoiceGrant` in
-/// `src/importer/transform_class.rs`) unlock at or below `level`. One
-/// `(count, Vec<Spell>)` per still-active filter row, not merged across rows,
-/// so a subclass with several independent filters (e.g. Arcana Domain's
-/// 17th-level feature grants four separate single-spell picks) surfaces as
-/// four separate labelled slot-groups rather than one conflated pool.
+/// Spell choice-pools a subclass's `{"choose": ...}` grants unlock at or
+/// below `level`, one `(count, Vec<Spell>)` per filter row (not merged).
 pub async fn get_subclass_spell_choice_pools(
     pool: &SqlitePool,
     subclass_id: &str,

@@ -260,15 +260,9 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
         ));
     }
 
-    // Same reasoning again, for a subclass's `{"choose": ...}` spell grants
-    // (Cleric Nature/Death/Arcana Domain's free cantrip/spell picks — see
-    // Vikunja #57): re-derive each still-unlocked filter's own pool,
-    // flattened into one required pick-slot per unit of `count`, and check
-    // the submitted picks against them index-for-index — same convention
-    // `skill_choices` uses for `SkillSlots.choice_pools`, not the
-    // augmenting-path matching `attribute_multiclass_choices` needs for the
-    // ordinary cantrip/spell pools, since these filter pools don't overlap
-    // with each other in any imported subclass today.
+    // Same convention `skill_choices` uses for `SkillSlots.choice_pools`:
+    // index-for-index against each filter's own pool, not the
+    // augmenting-path matching ordinary cantrip/spell pools need.
     let mut spell_choice_slots: Vec<Vec<String>> = Vec::new();
     let mut spell_choice_pool_spells: Vec<Spell> = Vec::new();
     for (entry, _detail, subclass) in &resolved {
@@ -277,17 +271,8 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
                 .await
                 .map_err(|err| ServerFnError::new(err.to_string()))?;
             for (count, spells) in pools {
-                // An empty-resolving pool (e.g. the filter's `class_name`
-                // names a class this instance hasn't imported yet — a
-                // self-hosted deploy can import source books incrementally,
-                // same dangling-reference tolerance the rest of the import
-                // pipeline already has) can't offer any pick at all.
-                // Skipping it here rather than pushing an unfillable
-                // required slot keeps the character savable instead of
-                // rejecting every submission with no way to satisfy it —
-                // unlike `skill_slots`' full-list fallback, falling back to
-                // "every spell in the library" isn't a safe substitute for a
-                // narrow class/school-scoped pool.
+                // Skip an empty-resolving pool (e.g. an unimported class)
+                // rather than requiring an unfillable pick.
                 if spells.is_empty() {
                     continue;
                 }
@@ -548,16 +533,11 @@ struct SpellRequirement {
     spells_required: usize,
 }
 
-/// One required pick slot from a subclass's `{"choose": ...}` spell grant
-/// (e.g. Cleric Nature Domain's "any Druid cantrip") — one entry per pick,
-/// so a `count: 2` filter expands into two slots. `spell_grant_choices` is
-/// index-aligned to a flattened `Vec<SpellChoiceSlot>`, same convention as
-/// `skill_choices`/`SkillSlots.choice_pools`.
+/// One required pick slot from a subclass's `{"choose": ...}` spell grant —
+/// a `count: 2` filter expands into two slots.
 #[derive(Clone, PartialEq)]
 struct SpellChoiceSlot {
     class_id: String,
-    /// The granting subclass's name, shown as a heading so the player knows
-    /// where this pick is coming from (see Vikunja #57).
     source: String,
     options: Vec<Spell>,
 }
@@ -927,14 +907,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             .unwrap_or_default();
         skill_slots(&combined_class_skills, &background_skills)
     });
-    // Every skill the character is currently proficient in — fixed grants
-    // plus resolved choice picks — each tagged with the class/background it
-    // came from, so the Skills step can show an at-a-glance summary instead
-    // of making the player hunt through each choice slot to remember why
-    // they have a given proficiency. Recomputes the same labelled grants
-    // `skill_inputs` does rather than threading sources through `SkillSlots`
-    // itself — `fixed` there stays a plain deduped list since callers other
-    // than this summary (validation, the sheet) don't need per-skill source.
+    // Every proficient skill, tagged with its granting class/background, for
+    // the Skills step's at-a-glance summary.
     let skill_proficiency_sources = Memo::new(move |_| -> Vec<(String, Vec<String>)> {
         let class_lookup: HashMap<String, Class> =
             class_details_map().into_iter().map(|(id, detail)| (id, detail.class)).collect();
@@ -1130,12 +1104,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             .unwrap_or_default()
     };
 
-    // A subclass's `{"choose": ...}` spell grants (e.g. Cleric Nature/Death/
-    // Arcana Domain's free cantrip/spell picks — see Vikunja #57), resolved
-    // into pools the player actually chooses from, unlike `granted_spells_all`
-    // above which is the always-active/no-choice case. Echoes the entry-key
-    // snapshot alongside the pools, same staleness-detection pattern as
-    // `spell_options_all`.
+    // Unlike `granted_spells_all` above (always-active, no choice), these
+    // are subclass spell grants the player actually picks from.
     let spell_choice_pools_all: Resource<
         Result<(Vec<EntryKey>, Vec<(String, String, Vec<(u8, Vec<Spell>)>)>), ServerFnError>,
     > = Resource::new(
@@ -1157,9 +1127,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         let expected: Vec<EntryKey> = resolved_entries.get().iter().map(entry_key).collect();
         spell_choice_pools_all.get().and_then(|r| r.ok()).is_some_and(|(keyed, _)| keyed == expected)
     };
-    // Flattens each filter row's `count` into that many individual pick
-    // slots (e.g. Arcana Domain's 17th-level feature is 4 separate
-    // single-spell filters, so 4 slots), index-aligned to `spell_grant_choices`.
+    // Flattens each filter row's `count` into that many pick slots,
+    // index-aligned to `spell_grant_choices`.
     let spell_choice_slots = Memo::new(move |_| -> Vec<SpellChoiceSlot> {
         spell_choice_pools_all
             .get()
@@ -1168,10 +1137,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             .unwrap_or_default()
             .into_iter()
             .flat_map(|(class_id, source, pools)| {
-                // Skip a pool that resolved empty (e.g. its filter's class
-                // isn't imported on this instance) rather than rendering an
-                // unfillable required slot — see the matching skip in
-                // `save_character`'s re-validation.
+                // Skip a pool that resolved empty (see save_character's matching skip).
                 pools.into_iter().filter(|(_, spells)| !spells.is_empty()).flat_map(move |(count, spells)| {
                     let class_id = class_id.clone();
                     let source = source.clone();
@@ -1184,11 +1150,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             })
             .collect()
     });
-    // Same reasoning as the skill-choices reset effect above: resize to the
-    // current slot count and drop any pick that fell out of its slot's own
-    // pool (a class/level/subclass change narrowed or removed it), guarded
-    // on the resource actually reflecting the current selection so a
-    // still-loading fetch doesn't wipe real picks.
+    // Same reasoning as the skill-choices reset effect above.
     Effect::new(move |_| {
         if !spell_choice_pools_ready() {
             return;
@@ -1319,6 +1281,13 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             }
             for spell in granted_spells_for(&entry.entry.class_id) {
                 names.insert(spell.name.to_lowercase());
+            }
+        }
+        for (choice, slot) in spell_grant_choices.get().iter().zip(spell_choice_slots.get().iter()) {
+            if let Some(id) = choice {
+                if let Some(spell) = slot.options.iter().find(|s| &s.id == id) {
+                    names.insert(spell.name.to_lowercase());
+                }
             }
         }
         names
@@ -1573,6 +1542,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         7 => {
             cantrip_choices.get().len() == total_cantrips_required()
                 && spell_choices.get().len() == total_spells_required()
+                && spell_grant_choices.get().len() == spell_choice_slots.get().len()
+                && spell_grant_choices.get().iter().all(Option::is_some)
         }
         8 => {
             asi_choices.get().len() == asi_entries.get().len()
@@ -4174,10 +4145,7 @@ fn spell_choice_chip(
     }
 }
 
-/// One labelled dropdown for a subclass's `{"choose": ...}` spell grant slot
-/// (e.g. "Nature Domain: choose a Druid cantrip") — same shape as `skill_slot`,
-/// just spell-flavored and always a single required pick per slot (`count`
-/// is expanded into separate slots by `spell_choice_slots`).
+/// One labelled dropdown for a subclass spell grant slot — same shape as `skill_slot`.
 fn spell_choice_slot(
     slot: usize,
     choice_slot: SpellChoiceSlot,
@@ -4200,11 +4168,7 @@ fn spell_choice_slot(
     let heading = format!("{}: choose a {level_label}", choice_slot.source);
     let options = choice_slot.options;
     let focus_options = options.clone();
-    // Disabled once picked in a sibling slot — same reasoning as `skill_slot`'s
-    // `is_disabled`: a `count > 1` filter (e.g. Arcana Domain's "choose 2
-    // Wizard cantrips") expands into independent slots sharing one pool, and
-    // without this a player could pick the same spell in both, silently
-    // costing them a distinct pick the feature intends to grant.
+    // Disabled once picked in a sibling slot, same reasoning as `skill_slot`.
     let is_disabled = move |spell_id: &str| {
         spell_grant_choices
             .get()

@@ -51,12 +51,7 @@ pub struct Character {
     #[serde(default)]
     pub spell_choices: Vec<String>,
     /// Spells picked to fill a subclass's `{"choose": ...}` filter grants
-    /// (e.g. Cleric Nature Domain's "any Druid cantrip") — kept separate
-    /// from `cantrip_choices`/`spell_choices` since these slots are
-    /// subclass-sourced with their own pool/count, not part of the
-    /// class's ordinary known/prepared budget. Index-aligned to the
-    /// resolved choice-pool slots the same way `skill_choices` aligns to
-    /// `SkillSlots.choice_pools`.
+    /// (e.g. Cleric Nature Domain's "any Druid cantrip").
     #[serde(default)]
     pub spell_grant_choices: Vec<String>,
     /// Optional features chosen (Invocations, Fighting Style, Maneuvers,
@@ -1005,10 +1000,7 @@ pub fn active_subclass<'a>(
     unlocked.then(|| class_detail.subclass(subclass_id)).flatten()
 }
 
-/// One required skill choice-pool slot, labelled with whichever class/
-/// background granted it — lets the wizard show "Cleric: choose 2" and
-/// "Background: Acolyte: choose 1" as distinct, sourced picks instead of an
-/// anonymous merged list (see Vikunja #57).
+/// One required skill choice-pool slot, labelled with its granting class/background.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SkillChoicePool {
     pub source: String,

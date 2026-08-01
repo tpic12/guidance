@@ -27,17 +27,8 @@ pub struct GrantedSpellRef {
     pub level: u8,
 }
 
-/// One "pick `count` spells matching this filter" grant from a
-/// `{"choose": "level=N|class=X"}` / `{"choose": "level=N|school=X", "count":
-/// N}` additionalSpells entry (Cleric Nature/Death/Arcana Domain's free
-/// cantrip/spell picks) — resolved into an actual pool at wizard time, not
-/// here. The `u8` grant level this is paired with elsewhere is the
-/// *character* level that unlocks the pick; `spell_level` here is the
-/// filter's own `level=N` (the picked spell's level). Only the single-level
-/// `class=`/`school=` shape is modeled; Bard Magical Secrets' semicolon
-/// multi-level list and empty-string "any spell" shapes are a materially
-/// different open-ended picker and are left unparsed (see
-/// `parse_choose_filter`), tracked as a follow-up rather than handled here.
+/// A "pick `count` spells matching this filter" grant from additionalSpells'
+/// `{"choose": ...}` shape — resolved into a pool at wizard time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpellChoiceGrant {
     pub spell_level: u8,
@@ -46,11 +37,8 @@ pub struct SpellChoiceGrant {
     pub count: u8,
 }
 
-/// Normalizes one level's `additionalSpells` value into an iterable of
-/// candidate entries: either a bare JSON array, or `{"_": [...]}` (the shape
-/// 5etools uses when a level's grants need per-entry `"choose"` filters
-/// rather than a flat spell-name list, e.g. Cleric Nature Domain). Any other
-/// shape (the `{"daily": {...}}` wrapper) yields nothing.
+/// Normalizes a level's `additionalSpells` value into an iterable of
+/// entries: a bare array, or `{"_": [...]}`.
 fn spell_entries_at_level(value: &Value) -> Vec<&Value> {
     if let Some(items) = value.as_array() {
         return items.iter().collect();
@@ -61,18 +49,10 @@ fn spell_entries_at_level(value: &Value) -> Vec<&Value> {
     Vec::new()
 }
 
-/// Parses a `{"choose": "level=N|class=X"}`/`{"choose": "level=N|school=X"}`
-/// filter string into a `SpellChoiceGrant`. Returns `None` (tolerated, not an
-/// error) for shapes this doesn't model: a semicolon-separated multi-level
-/// list or an empty string (both seen on Bard Magical Secrets, a materially
-/// different "any spell" picker), a missing/unparseable `level`, an
-/// unrecognized `school` letter code, or a `level=N` with neither `class=`
-/// nor `school=` — that's the same open-ended "any spell of this level"
-/// shape as the semicolon-list/empty-string cases, just missing the tell;
-/// without this check it would fall through to `db::get_subclass_spell_choice_pools`'s
-/// unscoped `(None, None)` branch and resolve to every spell of that level in
-/// the entire reference library, not the narrow class/school-scoped pool
-/// this grant type models.
+/// Parses `"level=N|class=X"`/`"level=N|school=X"`. Returns `None` for a
+/// semicolon list, an empty string, a bad/missing `level`, an unknown
+/// `school` code, or neither `class`/`school` set — all open-ended "any
+/// spell" shapes this grant type isn't meant to cover.
 fn parse_choose_filter(choose: &str, count: u8) -> Option<SpellChoiceGrant> {
     if choose.is_empty() {
         return None;
@@ -100,14 +80,9 @@ fn parse_choose_filter(choose: &str, count: u8) -> Option<SpellChoiceGrant> {
     Some(SpellChoiceGrant { spell_level: spell_level?, class_name, school, count })
 }
 
-/// Extracts one `additionalSpells` level entry's spells: a flat JSON array of
-/// strings is a fixed grant (names sometimes carry a `#c`/`|SOURCE` tag
-/// suffix — `"light#c"`, `"fire shield|"` — that isn't part of the spell's
-/// actual name); a `{"choose": ...}` object is a dynamic pick, resolved via
-/// `parse_choose_filter`. Anything else (unparseable choose shapes, the
-/// `{"daily": {...}}` once-per-day wrapper) is skipped — daily grants have no
-/// wizard-side representation yet, tracked as a known gap in TDD.md's Phase 6
-/// notes rather than left only here.
+/// Classifies one level's entries into fixed grants (strings, stripping any
+/// `#`/`|` tag suffix) and choice grants (`{"choose": ...}` objects);
+/// anything else is skipped.
 fn spell_grants_at_level(value: &Value) -> (Vec<String>, Vec<SpellChoiceGrant>) {
     let mut fixed = Vec::new();
     let mut choices = Vec::new();
@@ -133,9 +108,6 @@ fn spell_grants_at_level(value: &Value) -> (Vec<String>, Vec<SpellChoiceGrant>) 
     (fixed, choices)
 }
 
-/// One `additionalSpells` entry's grants, split into always-active fixed
-/// grants and dynamic-pick choice grants (each choice grant paired with the
-/// character level that unlocks it).
 #[derive(Debug, Default)]
 struct EntrySpellGrants {
     fixed: Vec<GrantedSpellRef>,

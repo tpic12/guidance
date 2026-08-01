@@ -926,9 +926,6 @@ async fn get_subclass_granted_spells_returns_only_unlocked_grants_ordered_by_lev
 
 #[tokio::test]
 async fn get_subclass_spell_choice_pools_filters_by_level_class_school_and_gates_on_grant_level() {
-    // Mirrors Cleric Nature Domain (`class=Druid`) and Death Domain
-    // (`school=N`... here Evocation for the fixture spells we have) — see
-    // Vikunja #57.
     let pool = test_pool().await;
     spell_fixtures(&pool).await; // Fireball(3, Evocation), Fire Bolt(0, Evocation), Charm Person(1, Enchantment)
     insert_class(&pool, "fake-cleric", "Fake Cleric").await;
@@ -942,7 +939,6 @@ async fn get_subclass_spell_choice_pools_filters_by_level_class_school_and_gates
         .await
         .unwrap();
 
-    // A `class=Druid` cantrip filter, unlocked at level 1.
     sqlx::query(
         "INSERT INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
     )
@@ -955,8 +951,6 @@ async fn get_subclass_spell_choice_pools_filters_by_level_class_school_and_gates
     .execute(&pool)
     .await
     .unwrap();
-    // A `school=Evocation`, level-3 filter (no class restriction), unlocked
-    // only at level 5, with a count of 2.
     sqlx::query(
         "INSERT INTO subclass_spell_choice_grants (subclass_id, grant_level, spell_level, class_name, school, count) VALUES (?,?,?,?,?,?)",
     )
@@ -983,14 +977,7 @@ async fn get_subclass_spell_choice_pools_filters_by_level_class_school_and_gates
 
 #[tokio::test]
 async fn subclass_spell_choice_grants_insert_or_ignore_dedupes_on_reseed() {
-    // A `SEED_RESET=1` reseed re-inserts every grant row `seed_classes` reads
-    // from the fixtures. Without a real uniqueness constraint that treats
-    // NULL `class_name`/`school` consistently (SQLite's plain UNIQUE treats
-    // every NULL as distinct from every other NULL), re-seeding would
-    // silently duplicate rows for the common case where only one of those
-    // two filter fields is set. Exercise both the null-school and
-    // null-class_name shapes to confirm the COALESCE'd unique index catches
-    // both, not just the case where every column happens to be non-null.
+    // Covers both the null-school and null-class_name shapes.
     let pool = test_pool().await;
     insert_class(&pool, "fake-cleric", "Fake Cleric").await;
     insert_subclass(&pool, "fake-nature-domain", "fake-cleric", "Fake Nature Domain").await;

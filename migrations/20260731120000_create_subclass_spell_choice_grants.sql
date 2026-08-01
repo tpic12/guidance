@@ -10,13 +10,8 @@ CREATE TABLE subclass_spell_choice_grants (
 
 CREATE INDEX idx_subclass_spell_choice_grants_subclass ON subclass_spell_choice_grants(subclass_id);
 
--- `class_name`/`school` are nullable filter fields, and SQLite's UNIQUE
--- treats each NULL as distinct from every other NULL — a plain UNIQUE
--- constraint on the raw columns would silently let a re-seed duplicate any
--- row where one of those is NULL (which is most of them: a filter names
--- either a class or a school, rarely both). COALESCE to an empty string
--- first so two NULLs collide as expected, matching `INSERT OR IGNORE`'s use
--- in `seed_classes`.
+-- COALESCE'd because SQLite's UNIQUE treats every NULL as distinct, which
+-- would otherwise let a re-seed duplicate rows where class_name/school is NULL.
 CREATE UNIQUE INDEX idx_subclass_spell_choice_grants_unique
     ON subclass_spell_choice_grants(
         subclass_id,

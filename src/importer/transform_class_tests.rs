@@ -420,10 +420,6 @@ fn additional_spells_strips_hash_and_pipe_suffixes() {
 
 #[test]
 fn additional_spells_nature_domain_choose_filter_becomes_a_choice_grant() {
-    // Nature Domain's bonus cantrip (`fixtures/classes/cleric.json`): a
-    // `{"_": [{"choose": "level=0|class=Druid"}]}` wrapper, not a bare
-    // array — the sibling fixed `prepared` entry in the same block should
-    // still produce its own `GrantedSpellRef`.
     let raw = cleric_shaped_file(json!([{
         "known": {"1": {"_": [{"choose": "level=0|class=Druid"}]}},
         "prepared": {"1": ["animal friendship"]}
@@ -446,8 +442,6 @@ fn additional_spells_nature_domain_choose_filter_becomes_a_choice_grant() {
 
 #[test]
 fn additional_spells_death_domain_school_filter_with_count() {
-    // Death Domain's bonus cantrip: `school=N` (Necromancy) with an
-    // explicit sibling `"count"` key.
     let raw = cleric_shaped_file(json!([{
         "known": {"1": {"_": [{"choose": "level=0|school=N", "count": 1}]}}
     }]));
@@ -482,9 +476,6 @@ fn additional_spells_arcana_domain_count_two_filter() {
 
 #[test]
 fn additional_spells_arcana_domain_bare_array_of_choose_objects() {
-    // Arcana Domain's 17th-level feature: a *bare array* (no `"_"` wrapper)
-    // whose elements are `{"choose": ...}` objects, not strings — four
-    // separate single-spell filters.
     let raw = cleric_shaped_file(json!([{
         "prepared": {"17": [
             {"choose": "level=6|class=Wizard"},
@@ -506,12 +497,6 @@ fn additional_spells_arcana_domain_bare_array_of_choose_objects() {
 
 #[test]
 fn additional_spells_skips_daily_wrappers_and_bard_open_ended_shapes() {
-    // Fathomless's "known" entry is a `{"daily": ...}` wrapper (once-per-day,
-    // not an always-active spell, out of scope per Vikunja #57). Bard
-    // Magical Secrets' semicolon multi-level list and empty-string "any
-    // spell" shapes are a materially different open-ended picker, also
-    // deferred — both must be skipped without producing a grant or
-    // panicking, while the sibling fixed `prepared` entry still works.
     let raw = cleric_shaped_file(json!([{
         "known": {
             "10": {"daily": {"1": ["evard's black tentacles"]}},
@@ -600,8 +585,6 @@ fn named_variants_inherit_any_ungrouped_common_grants() {
 
 #[test]
 fn parse_choose_filter_rejects_semicolon_level_lists_and_empty_strings() {
-    // Bard Magical Secrets' shapes — a materially different "any spell"
-    // picker, deferred (see Vikunja #57).
     assert_eq!(parse_choose_filter("level=0;1;2;3;4;5", 1), None);
     assert_eq!(parse_choose_filter("", 1), None);
 }
@@ -627,11 +610,5 @@ fn parse_choose_filter_defaults_count_and_parses_class_only() {
 
 #[test]
 fn parse_choose_filter_rejects_bare_level_with_no_class_or_school() {
-    // A `level=N` filter with neither `class=` nor `school=` is the same
-    // open-ended "any spell of this level" shape as the semicolon-list/
-    // empty-string cases — without this rejection it would resolve to every
-    // spell of that level in the entire reference library (see
-    // `db::get_subclass_spell_choice_pools`'s `(None, None)` branch), not a
-    // narrow scoped pool.
     assert_eq!(parse_choose_filter("level=3", 1), None);
 }
