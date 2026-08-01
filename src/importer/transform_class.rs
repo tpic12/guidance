@@ -65,8 +65,14 @@ fn spell_entries_at_level(value: &Value) -> Vec<&Value> {
 /// filter string into a `SpellChoiceGrant`. Returns `None` (tolerated, not an
 /// error) for shapes this doesn't model: a semicolon-separated multi-level
 /// list or an empty string (both seen on Bard Magical Secrets, a materially
-/// different "any spell" picker), a missing/unparseable `level`, or an
-/// unrecognized `school` letter code.
+/// different "any spell" picker), a missing/unparseable `level`, an
+/// unrecognized `school` letter code, or a `level=N` with neither `class=`
+/// nor `school=` — that's the same open-ended "any spell of this level"
+/// shape as the semicolon-list/empty-string cases, just missing the tell;
+/// without this check it would fall through to `db::get_subclass_spell_choice_pools`'s
+/// unscoped `(None, None)` branch and resolve to every spell of that level in
+/// the entire reference library, not the narrow class/school-scoped pool
+/// this grant type models.
 fn parse_choose_filter(choose: &str, count: u8) -> Option<SpellChoiceGrant> {
     if choose.is_empty() {
         return None;
@@ -87,6 +93,9 @@ fn parse_choose_filter(choose: &str, count: u8) -> Option<SpellChoiceGrant> {
             "school" => school = Some(school_from_code(value).ok()?),
             _ => {}
         }
+    }
+    if class_name.is_none() && school.is_none() {
+        return None;
     }
     Some(SpellChoiceGrant { spell_level: spell_level?, class_name, school, count })
 }

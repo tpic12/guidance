@@ -277,6 +277,20 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
                 .await
                 .map_err(|err| ServerFnError::new(err.to_string()))?;
             for (count, spells) in pools {
+                // An empty-resolving pool (e.g. the filter's `class_name`
+                // names a class this instance hasn't imported yet — a
+                // self-hosted deploy can import source books incrementally,
+                // same dangling-reference tolerance the rest of the import
+                // pipeline already has) can't offer any pick at all.
+                // Skipping it here rather than pushing an unfillable
+                // required slot keeps the character savable instead of
+                // rejecting every submission with no way to satisfy it —
+                // unlike `skill_slots`' full-list fallback, falling back to
+                // "every spell in the library" isn't a safe substitute for a
+                // narrow class/school-scoped pool.
+                if spells.is_empty() {
+                    continue;
+                }
                 let ids: Vec<String> = spells.iter().map(|s| s.id.clone()).collect();
                 for _ in 0..count {
                     spell_choice_slots.push(ids.clone());
@@ -1154,7 +1168,11 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             .unwrap_or_default()
             .into_iter()
             .flat_map(|(class_id, source, pools)| {
-                pools.into_iter().flat_map(move |(count, spells)| {
+                // Skip a pool that resolved empty (e.g. its filter's class
+                // isn't imported on this instance) rather than rendering an
+                // unfillable required slot — see the matching skip in
+                // `save_character`'s re-validation.
+                pools.into_iter().filter(|(_, spells)| !spells.is_empty()).flat_map(move |(count, spells)| {
                     let class_id = class_id.clone();
                     let source = source.clone();
                     (0..count).map(move |_| SpellChoiceSlot {

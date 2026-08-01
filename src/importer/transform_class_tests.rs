@@ -624,3 +624,14 @@ fn parse_choose_filter_defaults_count_and_parses_class_only() {
         Some(SpellChoiceGrant { spell_level: 2, class_name: Some("Druid".to_string()), school: None, count: 1 })
     );
 }
+
+#[test]
+fn parse_choose_filter_rejects_bare_level_with_no_class_or_school() {
+    // A `level=N` filter with neither `class=` nor `school=` is the same
+    // open-ended "any spell of this level" shape as the semicolon-list/
+    // empty-string cases — without this rejection it would resolve to every
+    // spell of that level in the entire reference library (see
+    // `db::get_subclass_spell_choice_pools`'s `(None, None)` branch), not a
+    // narrow scoped pool.
+    assert_eq!(parse_choose_filter("level=3", 1), None);
+}
