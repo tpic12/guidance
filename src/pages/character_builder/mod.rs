@@ -620,8 +620,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
     let language_choices = RwSignal::new(Vec::<Option<String>>::new());
     let tool_choices = RwSignal::new(Vec::<Option<String>>::new());
     let custom_skill_choices = RwSignal::new(Vec::<Option<String>>::new());
-    let custom_language_choices = RwSignal::new(Vec::<String>::new());
-    let custom_tool_choices = RwSignal::new(Vec::<String>::new());
+    let custom_language_choices = RwSignal::new(Vec::<Option<String>>::new());
+    let custom_tool_choices = RwSignal::new(Vec::<Option<String>>::new());
     let cantrip_choices = RwSignal::new(Vec::<String>::new());
     let spell_choices = RwSignal::new(Vec::<String>::new());
     let spell_grant_choices = RwSignal::new(Vec::<Option<String>>::new());
@@ -759,8 +759,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             language_choices.set(existing.language_choices.into_iter().map(Some).collect());
             tool_choices.set(existing.tool_choices.into_iter().map(Some).collect());
             custom_skill_choices.set(existing.custom_skill_proficiencies.into_iter().map(Some).collect());
-            custom_language_choices.set(existing.custom_language_proficiencies);
-            custom_tool_choices.set(existing.custom_tool_proficiencies);
+            custom_language_choices.set(existing.custom_language_proficiencies.into_iter().map(Some).collect());
+            custom_tool_choices.set(existing.custom_tool_proficiencies.into_iter().map(Some).collect());
             cantrip_choices.set(existing.cantrip_choices);
             spell_choices.set(existing.spell_choices);
             spell_grant_choices.set(existing.spell_grant_choices.into_iter().map(Some).collect());
@@ -810,8 +810,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             language_choices: language_choices.get().into_iter().flatten().collect(),
             tool_choices: tool_choices.get().into_iter().flatten().collect(),
             custom_skill_proficiencies: custom_skill_choices.get().into_iter().flatten().collect(),
-            custom_language_proficiencies: custom_language_choices.get(),
-            custom_tool_proficiencies: custom_tool_choices.get(),
+            custom_language_proficiencies: custom_language_choices.get().into_iter().flatten().collect(),
+            custom_tool_proficiencies: custom_tool_choices.get().into_iter().flatten().collect(),
             cantrip_choices: cantrip_choices.get(),
             spell_choices: spell_choices.get(),
             spell_grant_choices: spell_grant_choices.get().into_iter().flatten().collect(),
@@ -986,6 +986,12 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                 }
             }
         }
+        for skill in custom_skill_choices.get().into_iter().flatten() {
+            let entry = sources.entry(skill).or_default();
+            if !entry.iter().any(|source| source == "Custom") {
+                entry.push("Custom".to_string());
+            }
+        }
         let mut rows: Vec<(String, Vec<String>)> = sources.into_iter().collect();
         rows.sort_by(|a, b| skill_label(&a.0).cmp(&skill_label(&b.0)));
         rows
@@ -1047,6 +1053,12 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                 }
             }
         }
+        for language in custom_language_choices.get().into_iter().flatten() {
+            let entry = sources.entry(language).or_default();
+            if !entry.iter().any(|source| source == "Custom") {
+                entry.push("Custom".to_string());
+            }
+        }
         let mut rows: Vec<(String, Vec<String>)> = sources.into_iter().collect();
         rows.sort_by(|a, b| title_case(&a.0).cmp(&title_case(&b.0)));
         rows
@@ -1106,6 +1118,12 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                 if !entry.contains(&pool.source) {
                     entry.push(pool.source.clone());
                 }
+            }
+        }
+        for tool in custom_tool_choices.get().into_iter().flatten() {
+            let entry = sources.entry(tool).or_default();
+            if !entry.iter().any(|source| source == "Custom") {
+                entry.push("Custom".to_string());
             }
         }
         let mut rows: Vec<(String, Vec<String>)> = sources.into_iter().collect();
@@ -1631,12 +1649,20 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         let mut language_names =
             language_choices.get().into_iter().flatten().map(|language| title_case(&language)).collect::<Vec<_>>();
         language_names.extend(
-            custom_language_choices.get().iter().map(|language| format!("{} (Custom)", title_case(language))),
+            custom_language_choices
+                .get()
+                .into_iter()
+                .flatten()
+                .map(|language| format!("{} (Custom)", title_case(&language))),
         );
         let mut tool_names =
             tool_choices.get().into_iter().flatten().map(|tool| title_case(&tool)).collect::<Vec<_>>();
         tool_names.extend(
-            custom_tool_choices.get().iter().map(|tool| format!("{} (Custom)", title_case(tool))),
+            custom_tool_choices
+                .get()
+                .into_iter()
+                .flatten()
+                .map(|tool| format!("{} (Custom)", title_case(&tool))),
         );
 
         let feats = feat_list.get().and_then(|result| result.ok()).unwrap_or_default();
