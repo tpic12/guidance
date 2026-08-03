@@ -1,5 +1,6 @@
 use crate::components::entry_view::entry_view;
 use crate::models::class::{ability_label, ClassDetail, ClassFeature};
+use crate::models::proficiency::describe_tool_grants;
 use crate::models::skill::describe_skill_grants;
 use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
@@ -331,7 +332,7 @@ fn ClassDetailView(detail: ClassDetail) -> impl IntoView {
                             </li>
                             <li>
                                 <span class="font-semibold">"Tools: "</span>
-                                {list_or_none(&class.proficiencies.tools)}
+                                {describe_tool_grants(&class.proficiencies.tools)}
                             </li>
                             <li>
                                 <span class="font-semibold">"Skills: "</span>

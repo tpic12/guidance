@@ -15,6 +15,8 @@ pub struct RawSpecies {
     pub ability: Vec<Value>,
     #[serde(default)]
     pub darkvision: Option<u32>,
+    #[serde(default, rename = "languageProficiencies")]
+    pub language_proficiencies: Vec<Value>,
     #[serde(default)]
     pub entries: Vec<Value>,
     /// Stub records that inherit another record's content; skipped for now.

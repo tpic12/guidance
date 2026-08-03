@@ -158,6 +158,38 @@ fn fixed_and_choose_can_combine_with_fixed_listed_first() {
 }
 
 #[test]
+fn proficiencies_from_raw_wires_tool_proficiencies_not_the_flat_tools_strings() {
+    // Mirrors fixtures/classes/artificer.json's startingProficiencies shape.
+    let raw = RawStartingProficiencies {
+        armor: vec![],
+        weapons: vec![],
+        tools: vec![
+            json!("{@item thieves' tools|PHB}"),
+            json!("{@item tinker's tools|PHB}"),
+        ],
+        tool_proficiencies: vec![json!({
+            "thieves' tools": true,
+            "tinker's tools": true,
+            "anyArtisansTool": 1
+        })],
+        skills: vec![],
+    };
+    let proficiencies = proficiencies_from_raw(&raw);
+    assert_eq!(
+        proficiencies.tools,
+        vec![
+            crate::models::proficiency::ToolGrant::Fixed {
+                tools: vec!["thieves' tools".to_string(), "tinker's tools".to_string()]
+            },
+            crate::models::proficiency::ToolGrant::AnyCategory {
+                count: 1,
+                category: crate::models::proficiency::ToolCategory::ArtisansTool
+            },
+        ]
+    );
+}
+
+#[test]
 fn armor_and_weapon_labels_use_friendly_names() {
     assert_eq!(armor_label("light"), "Light armor");
     assert_eq!(armor_label("shield"), "Shields");

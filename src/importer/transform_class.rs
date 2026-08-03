@@ -4,6 +4,7 @@ use crate::importer::parse_class::{
     RawOptionalFeatureProgressionShape, RawStartingEquipment, RawStartingProficiencies, RawSubclass,
     RawTableGroup,
 };
+use crate::importer::proficiency_grants::tool_grants_from_raw;
 use crate::importer::transform::{school_from_code, slugify};
 use crate::models::class::{Class, ClassFeature, ClassTableGroup, OptionalFeatureProgression, Proficiencies, Subclass};
 use crate::models::optional_feature::FeatureType;
@@ -381,12 +382,7 @@ fn proficiencies_from_raw(raw: &RawStartingProficiencies) -> Proficiencies {
     Proficiencies {
         armor: raw.armor.iter().filter_map(|v| v.as_str()).map(armor_label).collect(),
         weapons: raw.weapons.iter().filter_map(|v| v.as_str()).map(weapon_label).collect(),
-        tools: raw
-            .tools
-            .iter()
-            .filter_map(|v| v.as_str())
-            .map(|t| capitalize(&clean_tags(t)))
-            .collect(),
+        tools: tool_grants_from_raw(&raw.tool_proficiencies),
         skills: skill_grants_from_class(&raw.skills),
     }
 }

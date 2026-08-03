@@ -1,5 +1,6 @@
 use crate::importer::entries::entries_from_values;
 use crate::importer::parse_species::RawSpecies;
+use crate::importer::proficiency_grants::language_grants_from_raw;
 use crate::importer::transform::slugify;
 use crate::models::class::ability_label;
 use crate::models::species::{AbilityBonusGrant, Species};
@@ -24,6 +25,7 @@ fn species_from_raw(raw: RawSpecies) -> Species {
         size: size_label(&raw.size),
         speed: speed_label(&raw.speed),
         darkvision: raw.darkvision,
+        languages: language_grants_from_raw(&raw.language_proficiencies),
         entries: entries_from_values(&raw.entries),
         name: raw.name,
         source: raw.source,

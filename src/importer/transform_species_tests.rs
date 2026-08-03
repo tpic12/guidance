@@ -139,6 +139,52 @@ fn size_codes_render_as_names() {
 }
 
 #[test]
+fn fixed_only_language_grant_matches_aarakocra_shape() {
+    let raws = crate::importer::parse_species::parse_species_file(
+        r#"{"race": [
+            {"name": "Aarakocra", "source": "MM", "entries": [], "languageProficiencies": [{"auran": true}]}
+        ]}"#,
+    )
+    .unwrap();
+    let species = species_from_parsed(raws).unwrap();
+    assert_eq!(
+        species[0].languages,
+        vec![crate::models::language::LanguageGrant::Fixed { languages: vec!["auran".to_string()] }]
+    );
+}
+
+#[test]
+fn mixed_fixed_other_and_any_standard_matches_merfolk_shape() {
+    let raws = crate::importer::parse_species::parse_species_file(
+        r#"{"race": [
+            {"name": "Merfolk", "source": "PSX", "entries": [], "languageProficiencies": [
+                {"common": true, "other": true, "anyStandard": 1}
+            ]}
+        ]}"#,
+    )
+    .unwrap();
+    let species = species_from_parsed(raws).unwrap();
+    assert_eq!(
+        species[0].languages,
+        vec![
+            crate::models::language::LanguageGrant::Fixed { languages: vec!["common".to_string()] },
+            crate::models::language::LanguageGrant::Any { count: 1 },
+            crate::models::language::LanguageGrant::Any { count: 1 },
+        ]
+    );
+}
+
+#[test]
+fn no_language_proficiencies_field_is_empty() {
+    let raws = crate::importer::parse_species::parse_species_file(
+        r#"{"race": [{"name": "Fake Skyfolk", "source": "TBK", "entries": []}]}"#,
+    )
+    .unwrap();
+    let species = species_from_parsed(raws).unwrap();
+    assert_eq!(species[0].languages, Vec::new());
+}
+
+#[test]
 fn copy_stubs_are_skipped() {
     let raws = crate::importer::parse_species::parse_species_file(
         r#"{"race": [
