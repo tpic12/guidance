@@ -2,6 +2,8 @@ use crate::models::character::{LanguageChoicePool, LanguageSlots};
 use crate::models::proficiency::{contains_ignore_case, title_case};
 use leptos::prelude::*;
 
+use super::proficiency_slot;
+
 pub fn languages_step(
     language_inputs: Memo<LanguageSlots>,
     language_choices: RwSignal<Vec<Option<String>>>,
@@ -90,67 +92,40 @@ fn language_slot(
     language_choices: RwSignal<Vec<Option<String>>>,
     custom_language_choices: RwSignal<Vec<Option<String>>>,
 ) -> impl IntoView {
-    let choice = move || language_choices.get().get(slot).cloned().flatten();
-    let set_choice = move |value: Option<String>| {
-        language_choices.update(|choices| {
-            if let Some(entry) = choices.get_mut(slot) {
-                *entry = value;
-            }
-        });
-    };
+    let heading = format!("{}: language choice", pool.source);
+    let options = pool.options;
     // Disabled once picked in a sibling slot, already granted outright by
     // background/species, or already added as a custom proficiency —
     // picking it here would just waste the slot on a language the character
     // already knows.
-    let is_disabled = move |opt: &str| {
-        contains_ignore_case(&language_inputs.get().fixed, opt)
-            || custom_language_choices.get().iter().any(|custom| custom.as_deref() == Some(opt))
+    let is_disabled = move |opt: String| {
+        contains_ignore_case(&language_inputs.get().fixed, &opt)
+            || custom_language_choices.get().iter().any(|custom| custom.as_deref() == Some(opt.as_str()))
             || language_choices
                 .get()
                 .iter()
                 .enumerate()
-                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt))
+                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt.as_str()))
     };
-    let heading = format!("{}: language choice", pool.source);
 
-    view! {
-        <div class="flex flex-col gap-1 p-3 border border-base-300 rounded-box">
-            <span class="font-semibold text-sm">{heading}</span>
-            <select
-                class="select select-bordered select-sm w-64"
-                on:change=move |ev| {
-                    let value = event_target_value(&ev);
-                    set_choice(if value.is_empty() { None } else { Some(value) });
+    proficiency_slot(
+        heading,
+        move || language_choices.get().get(slot).cloned().flatten(),
+        move |value| {
+            language_choices.update(|choices| {
+                if let Some(entry) = choices.get_mut(slot) {
+                    *entry = value;
                 }
-            >
-                <option value="" selected=move || choice().is_none()>
-                    "— choose —"
-                </option>
-                {pool
-                    .options
-                    .into_iter()
-                    .map(|opt| {
-                        let value = opt.clone();
-                        let label = title_case(&opt);
-                        let selected_opt = opt.clone();
-                        let disabled_opt = opt.clone();
-                        view! {
-                            <option
-                                value=value
-                                selected=move || choice().as_deref() == Some(selected_opt.as_str())
-                                disabled=move || is_disabled(&disabled_opt)
-                            >
-                                {label}
-                            </option>
-                        }
-                    })
-                    .collect_view()}
-            </select>
-        </div>
-    }
+            });
+        },
+        move || options.clone(),
+        is_disabled,
+        title_case,
+        None,
+    )
 }
 
-// Same look as `language_slot` (a "Custom: language choice" row is
+// Same shape as `language_slot` (a "Custom: language choice" row is
 // otherwise indistinguishable from a granted one), plus a remove control
 // since these are directly player-added rather than derived from a grant.
 fn custom_language_slot(
@@ -160,73 +135,39 @@ fn custom_language_slot(
     custom_language_choices: RwSignal<Vec<Option<String>>>,
     all_language_names: impl Fn() -> Vec<String> + Send + Sync + 'static,
 ) -> impl IntoView {
-    let choice = move || custom_language_choices.get().get(slot).cloned().flatten();
-    let set_choice = move |value: Option<String>| {
-        custom_language_choices.update(|choices| {
-            if let Some(entry) = choices.get_mut(slot) {
-                *entry = value;
-            }
-        });
-    };
     // Disabled once picked in a sibling slot (granted or custom), or already
     // granted outright by background/species — same reasoning as
     // `language_slot`.
-    let is_disabled = move |opt: &str| {
-        contains_ignore_case(&language_inputs.get().fixed, opt)
-            || language_choices.get().iter().any(|picked| picked.as_deref() == Some(opt))
+    let is_disabled = move |opt: String| {
+        contains_ignore_case(&language_inputs.get().fixed, &opt)
+            || language_choices.get().iter().any(|picked| picked.as_deref() == Some(opt.as_str()))
             || custom_language_choices
                 .get()
                 .iter()
                 .enumerate()
-                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt))
+                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt.as_str()))
     };
-    let remove = move |_| {
+    let on_remove = Callback::new(move |()| {
         custom_language_choices.update(|choices| {
             if slot < choices.len() {
                 choices.remove(slot);
             }
         });
-    };
+    });
 
-    view! {
-        <div class="flex flex-col gap-1 p-3 border border-base-300 rounded-box">
-            <div class="flex items-center justify-between">
-                <span class="font-semibold text-sm">"Custom: language choice"</span>
-                <button type="button" class="btn btn-ghost btn-xs" on:click=remove>
-                    "Remove"
-                </button>
-            </div>
-            <select
-                class="select select-bordered select-sm w-64"
-                on:change=move |ev| {
-                    let value = event_target_value(&ev);
-                    set_choice(if value.is_empty() { None } else { Some(value) });
+    proficiency_slot(
+        "Custom: language choice".to_string(),
+        move || custom_language_choices.get().get(slot).cloned().flatten(),
+        move |value| {
+            custom_language_choices.update(|choices| {
+                if let Some(entry) = choices.get_mut(slot) {
+                    *entry = value;
                 }
-            >
-                <option value="" selected=move || choice().is_none()>
-                    "— choose —"
-                </option>
-                {move || {
-                    all_language_names()
-                        .into_iter()
-                        .map(|opt| {
-                            let value = opt.clone();
-                            let label = title_case(&opt);
-                            let selected_opt = opt.clone();
-                            let disabled_opt = opt.clone();
-                            view! {
-                                <option
-                                    value=value
-                                    selected=move || choice().as_deref() == Some(selected_opt.as_str())
-                                    disabled=move || is_disabled(&disabled_opt)
-                                >
-                                    {label}
-                                </option>
-                            }
-                        })
-                        .collect_view()
-                }}
-            </select>
-        </div>
-    }
+            });
+        },
+        all_language_names,
+        is_disabled,
+        title_case,
+        Some(on_remove),
+    )
 }

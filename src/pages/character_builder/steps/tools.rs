@@ -2,6 +2,8 @@ use crate::models::character::{ToolChoicePool, ToolSlots};
 use crate::models::proficiency::{contains_ignore_case, title_case};
 use leptos::prelude::*;
 
+use super::proficiency_slot;
+
 pub fn tools_step(
     tool_inputs: Memo<ToolSlots>,
     tool_choices: RwSignal<Vec<Option<String>>>,
@@ -90,67 +92,40 @@ fn tool_slot(
     tool_choices: RwSignal<Vec<Option<String>>>,
     custom_tool_choices: RwSignal<Vec<Option<String>>>,
 ) -> impl IntoView {
-    let choice = move || tool_choices.get().get(slot).cloned().flatten();
-    let set_choice = move |value: Option<String>| {
-        tool_choices.update(|choices| {
-            if let Some(entry) = choices.get_mut(slot) {
-                *entry = value;
-            }
-        });
-    };
+    let heading = format!("{}: tool choice", pool.source);
+    let options = pool.options;
     // Disabled once picked in a sibling slot, already granted outright by
     // class/background, or already added as a custom proficiency — picking
     // it here would just waste the slot on a proficiency the character
     // already has.
-    let is_disabled = move |opt: &str| {
-        contains_ignore_case(&tool_inputs.get().fixed, opt)
-            || custom_tool_choices.get().iter().any(|custom| custom.as_deref() == Some(opt))
+    let is_disabled = move |opt: String| {
+        contains_ignore_case(&tool_inputs.get().fixed, &opt)
+            || custom_tool_choices.get().iter().any(|custom| custom.as_deref() == Some(opt.as_str()))
             || tool_choices
                 .get()
                 .iter()
                 .enumerate()
-                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt))
+                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt.as_str()))
     };
-    let heading = format!("{}: tool choice", pool.source);
 
-    view! {
-        <div class="flex flex-col gap-1 p-3 border border-base-300 rounded-box">
-            <span class="font-semibold text-sm">{heading}</span>
-            <select
-                class="select select-bordered select-sm w-64"
-                on:change=move |ev| {
-                    let value = event_target_value(&ev);
-                    set_choice(if value.is_empty() { None } else { Some(value) });
+    proficiency_slot(
+        heading,
+        move || tool_choices.get().get(slot).cloned().flatten(),
+        move |value| {
+            tool_choices.update(|choices| {
+                if let Some(entry) = choices.get_mut(slot) {
+                    *entry = value;
                 }
-            >
-                <option value="" selected=move || choice().is_none()>
-                    "— choose —"
-                </option>
-                {pool
-                    .options
-                    .into_iter()
-                    .map(|opt| {
-                        let value = opt.clone();
-                        let label = title_case(&opt);
-                        let selected_opt = opt.clone();
-                        let disabled_opt = opt.clone();
-                        view! {
-                            <option
-                                value=value
-                                selected=move || choice().as_deref() == Some(selected_opt.as_str())
-                                disabled=move || is_disabled(&disabled_opt)
-                            >
-                                {label}
-                            </option>
-                        }
-                    })
-                    .collect_view()}
-            </select>
-        </div>
-    }
+            });
+        },
+        move || options.clone(),
+        is_disabled,
+        title_case,
+        None,
+    )
 }
 
-// Same look as `tool_slot` (a "Custom: tool choice" row is otherwise
+// Same shape as `tool_slot` (a "Custom: tool choice" row is otherwise
 // indistinguishable from a granted one), plus a remove control since these
 // are directly player-added rather than derived from a grant.
 fn custom_tool_slot(
@@ -160,72 +135,38 @@ fn custom_tool_slot(
     custom_tool_choices: RwSignal<Vec<Option<String>>>,
     all_tool_names: impl Fn() -> Vec<String> + Send + Sync + 'static,
 ) -> impl IntoView {
-    let choice = move || custom_tool_choices.get().get(slot).cloned().flatten();
-    let set_choice = move |value: Option<String>| {
-        custom_tool_choices.update(|choices| {
-            if let Some(entry) = choices.get_mut(slot) {
-                *entry = value;
-            }
-        });
-    };
     // Disabled once picked in a sibling slot (granted or custom), or already
     // granted outright by class/background — same reasoning as `tool_slot`.
-    let is_disabled = move |opt: &str| {
-        contains_ignore_case(&tool_inputs.get().fixed, opt)
-            || tool_choices.get().iter().any(|picked| picked.as_deref() == Some(opt))
+    let is_disabled = move |opt: String| {
+        contains_ignore_case(&tool_inputs.get().fixed, &opt)
+            || tool_choices.get().iter().any(|picked| picked.as_deref() == Some(opt.as_str()))
             || custom_tool_choices
                 .get()
                 .iter()
                 .enumerate()
-                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt))
+                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt.as_str()))
     };
-    let remove = move |_| {
+    let on_remove = Callback::new(move |()| {
         custom_tool_choices.update(|choices| {
             if slot < choices.len() {
                 choices.remove(slot);
             }
         });
-    };
+    });
 
-    view! {
-        <div class="flex flex-col gap-1 p-3 border border-base-300 rounded-box">
-            <div class="flex items-center justify-between">
-                <span class="font-semibold text-sm">"Custom: tool choice"</span>
-                <button type="button" class="btn btn-ghost btn-xs" on:click=remove>
-                    "Remove"
-                </button>
-            </div>
-            <select
-                class="select select-bordered select-sm w-64"
-                on:change=move |ev| {
-                    let value = event_target_value(&ev);
-                    set_choice(if value.is_empty() { None } else { Some(value) });
+    proficiency_slot(
+        "Custom: tool choice".to_string(),
+        move || custom_tool_choices.get().get(slot).cloned().flatten(),
+        move |value| {
+            custom_tool_choices.update(|choices| {
+                if let Some(entry) = choices.get_mut(slot) {
+                    *entry = value;
                 }
-            >
-                <option value="" selected=move || choice().is_none()>
-                    "— choose —"
-                </option>
-                {move || {
-                    all_tool_names()
-                        .into_iter()
-                        .map(|opt| {
-                            let value = opt.clone();
-                            let label = title_case(&opt);
-                            let selected_opt = opt.clone();
-                            let disabled_opt = opt.clone();
-                            view! {
-                                <option
-                                    value=value
-                                    selected=move || choice().as_deref() == Some(selected_opt.as_str())
-                                    disabled=move || is_disabled(&disabled_opt)
-                                >
-                                    {label}
-                                </option>
-                            }
-                        })
-                        .collect_view()
-                }}
-            </select>
-        </div>
-    }
+            });
+        },
+        all_tool_names,
+        is_disabled,
+        title_case,
+        Some(on_remove),
+    )
 }
