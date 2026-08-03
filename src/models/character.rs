@@ -1,7 +1,9 @@
 use crate::models::background::Background;
 use crate::models::class::{ability_label, Class, ClassDetail, ClassFeature, Subclass};
 use crate::models::feat::Feat;
+use crate::models::language::LanguageGrant;
 use crate::models::optional_feature::{FeatureType, OptionalFeature};
+use crate::models::proficiency::{ToolCategory, ToolGrant, ToolOption};
 use crate::models::skill::{is_valid_skill, SkillGrant, SKILLS};
 use crate::models::species::{AbilityBonusGrant, Species};
 use crate::models::spell::Spell;
@@ -44,6 +46,14 @@ pub struct Character {
     /// must already be a proficient skill (fixed grant or `skill_choices`).
     #[serde(default)]
     pub expertise_choices: Vec<String>,
+    /// Languages chosen to fill the background/species's "choose N"/"any N"
+    /// slots. Fixed grants aren't stored here — re-derived via `language_slots`.
+    #[serde(default)]
+    pub language_choices: Vec<String>,
+    /// Tools chosen to fill the class/background's "choose N"/"any N"/
+    /// category slots. Fixed grants aren't stored here — re-derived via `tool_slots`.
+    #[serde(default)]
+    pub tool_choices: Vec<String>,
     /// Cantrips known, by spell id. Always empty for non-casters.
     #[serde(default)]
     pub cantrip_choices: Vec<String>,
@@ -164,6 +174,18 @@ impl Character {
         for skill in &self.expertise_choices {
             if !seen.insert(skill) {
                 return Err(format!("'{skill}' was chosen for expertise more than once"));
+            }
+        }
+        let mut seen = HashSet::new();
+        for language in &self.language_choices {
+            if !seen.insert(language) {
+                return Err(format!("'{language}' was chosen more than once"));
+            }
+        }
+        let mut seen = HashSet::new();
+        for tool in &self.tool_choices {
+            if !seen.insert(tool) {
+                return Err(format!("'{tool}' was chosen more than once"));
             }
         }
         match self.ability_bonus_source {
@@ -1082,6 +1104,169 @@ pub fn skill_slots(
     }
 
     SkillSlots { fixed, choice_pools }
+}
+
+/// One required language choice-pool slot, labelled with its granting
+/// background/species — mirrors `SkillChoicePool`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LanguageChoicePool {
+    pub source: String,
+    pub options: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LanguageSlots {
+    /// Languages granted outright by background + species, deduped.
+    pub fixed: Vec<String>,
+    /// One entry per required pick-slot: the grant's own option list, or
+    /// `all_language_names` if that list can't satisfy its count once
+    /// already-fixed languages are excluded (see `language_slots`).
+    pub choice_pools: Vec<LanguageChoicePool>,
+}
+
+/// Merges background + species language grants into the fixed set and the
+/// required choice slots, same fallback logic as `skill_slots` — a `Choose`
+/// grant's own `from` list is used where possible; if it can't supply enough
+/// options not already fixed-granted to satisfy its count, every slot for
+/// that grant falls back to `all_language_names` (the full DB-backed
+/// `Language` list) instead of shrinking the required count.
+pub fn language_slots(
+    background_languages: &[(String, LanguageGrant)],
+    species_languages: &[(String, LanguageGrant)],
+    all_language_names: &[String],
+) -> LanguageSlots {
+    let mut fixed = Vec::new();
+    for (_, grant) in background_languages.iter().chain(species_languages.iter()) {
+        if let LanguageGrant::Fixed { languages } = grant {
+            fixed.extend(languages.iter().cloned());
+        }
+    }
+    fixed.sort();
+    fixed.dedup();
+
+    let mut choice_pools = Vec::new();
+    for (source, grant) in background_languages.iter().chain(species_languages.iter()) {
+        match grant {
+            LanguageGrant::Fixed { .. } => {}
+            LanguageGrant::Choose { count, from } => {
+                let available = from.iter().filter(|language| !fixed.contains(language)).count();
+                let pool = if available >= *count as usize {
+                    from.clone()
+                } else {
+                    all_language_names.to_vec()
+                };
+                for _ in 0..*count {
+                    choice_pools.push(LanguageChoicePool { source: source.clone(), options: pool.clone() });
+                }
+            }
+            LanguageGrant::Any { count } => {
+                for _ in 0..*count {
+                    choice_pools.push(LanguageChoicePool {
+                        source: source.clone(),
+                        options: all_language_names.to_vec(),
+                    });
+                }
+            }
+        }
+    }
+
+    LanguageSlots { fixed, choice_pools }
+}
+
+/// One required tool choice-pool slot, labelled with its granting
+/// class/background — mirrors `SkillChoicePool`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolChoicePool {
+    pub source: String,
+    pub options: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolSlots {
+    /// Tools granted outright by class + background, deduped.
+    pub fixed: Vec<String>,
+    /// One entry per required pick-slot: the grant's own option list (with
+    /// any `ToolOption::Category`/`AnyCategory` entries expanded against
+    /// `category_members`), or every category's members if that list can't
+    /// satisfy its count once already-fixed tools are excluded.
+    pub choice_pools: Vec<ToolChoicePool>,
+}
+
+/// Combines tool-proficiency grants across every class a multiclass
+/// character has, same primary/multiclass split as `multiclass_class_skill_grants`.
+pub fn multiclass_class_tool_grants(
+    classes: &[ClassLevel],
+    class_lookup: &HashMap<String, Class>,
+) -> Vec<(String, ToolGrant)> {
+    let mut combined = Vec::new();
+    for (index, entry) in classes.iter().enumerate() {
+        let Some(class) = class_lookup.get(&entry.class_id) else { continue };
+        let profs = if index == 0 { &class.proficiencies } else { &class.multiclass_proficiencies };
+        let source = if index == 0 { class.name.clone() } else { format!("{} (multiclass)", class.name) };
+        combined.extend(profs.tools.iter().cloned().map(|grant| (source.clone(), grant)));
+    }
+    combined
+}
+
+fn expand_tool_option(option: &ToolOption, category_members: &HashMap<ToolCategory, Vec<String>>) -> Vec<String> {
+    match option {
+        ToolOption::Named(name) => vec![name.clone()],
+        ToolOption::Category(category) => category_members.get(category).cloned().unwrap_or_default(),
+    }
+}
+
+/// Merges class + background tool grants into the fixed set and the
+/// required choice slots, same fallback logic as `skill_slots`. Category
+/// tokens (`ToolOption::Category`/`AnyCategory`) are expanded against
+/// `category_members` — real tool item names grouped by `ToolCategory`,
+/// resolved from the `items` table's `item_type_code` column rather than a
+/// hardcoded member list (see `models::proficiency::ToolCategory`).
+pub fn tool_slots(
+    class_tools: &[(String, ToolGrant)],
+    background_tools: &[(String, ToolGrant)],
+    category_members: &HashMap<ToolCategory, Vec<String>>,
+) -> ToolSlots {
+    let mut fixed = Vec::new();
+    for (_, grant) in class_tools.iter().chain(background_tools.iter()) {
+        if let ToolGrant::Fixed { tools } = grant {
+            fixed.extend(tools.iter().cloned());
+        }
+    }
+    fixed.sort();
+    fixed.dedup();
+
+    let mut all_tools: Vec<String> = category_members.values().flatten().cloned().collect();
+    all_tools.sort();
+    all_tools.dedup();
+
+    let mut choice_pools = Vec::new();
+    for (source, grant) in class_tools.iter().chain(background_tools.iter()) {
+        match grant {
+            ToolGrant::Fixed { .. } => {}
+            ToolGrant::Choose { count, from } => {
+                let expanded: Vec<String> =
+                    from.iter().flat_map(|option| expand_tool_option(option, category_members)).collect();
+                let available = expanded.iter().filter(|tool| !fixed.contains(tool)).count();
+                let pool = if available >= *count as usize { expanded } else { all_tools.clone() };
+                for _ in 0..*count {
+                    choice_pools.push(ToolChoicePool { source: source.clone(), options: pool.clone() });
+                }
+            }
+            ToolGrant::Any { count } => {
+                for _ in 0..*count {
+                    choice_pools.push(ToolChoicePool { source: source.clone(), options: all_tools.clone() });
+                }
+            }
+            ToolGrant::AnyCategory { count, category } => {
+                let options = category_members.get(category).cloned().unwrap_or_default();
+                for _ in 0..*count {
+                    choice_pools.push(ToolChoicePool { source: source.clone(), options: options.clone() });
+                }
+            }
+        }
+    }
+
+    ToolSlots { fixed, choice_pools }
 }
 
 /// Each "Expertise" class feature (Rogue 1 & 6, Bard 3 & 10 in real 5e)

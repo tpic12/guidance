@@ -1,15 +1,18 @@
 use crate::models::background::BackgroundQuery;
 use crate::models::character::{
     active_optional_feature_types, active_subclass, asi_levels, cantrips_known_count, effective_spellcasting,
-    final_abilities, max_castable_spell_level, multiclass_active_optional_feature_types, multiclass_asi_slots,
-    multiclass_class_skill_grants, multiclass_expertise_slots, multiclass_prereq_violations,
-    multiclass_spell_profiles, optional_feature_quota, point_buy_cost, skill_slots, spells_known_count,
-    subclass_unlock_level, total_level, AbilityBonusSource, AbilityMethod, AbilityScores, AsiChoice, Character,
-    ClassLevel, HpMethod, SpellcastingProfile, ABILITY_CODES, POINT_BUY_BUDGET,
+    final_abilities, language_slots, max_castable_spell_level, multiclass_active_optional_feature_types,
+    multiclass_asi_slots, multiclass_class_skill_grants, multiclass_class_tool_grants, multiclass_expertise_slots,
+    multiclass_prereq_violations, multiclass_spell_profiles, optional_feature_quota, point_buy_cost, skill_slots,
+    spells_known_count, subclass_unlock_level, tool_slots, total_level, AbilityBonusSource, AbilityMethod,
+    AbilityScores, AsiChoice, Character, ClassLevel, HpMethod, SpellcastingProfile, ABILITY_CODES,
+    POINT_BUY_BUDGET,
 };
 use crate::models::class::{ability_label, Class, ClassDetail, Subclass};
 use crate::models::feat::FeatQuery;
+use crate::models::language::LanguageGrant;
 use crate::models::optional_feature::{is_eligible, EligibilityContext, FeatureType, OptionalFeature, OptionalFeatureQuery};
+use crate::models::proficiency::{title_case, ToolCategory, ToolGrant};
 use crate::models::skill::{skill_label, SkillGrant};
 use crate::models::species::{is_free_ability_choice, AbilityBonusGrant, SpeciesQuery};
 use crate::models::spell::Spell;
@@ -42,6 +45,38 @@ pub async fn get_character(id: String) -> Result<Option<Character>, ServerFnErro
     crate::db::get_character(&pool, &id, &user.id)
         .await
         .map_err(|err| ServerFnError::new(err.to_string()))
+}
+
+/// The full language reference list, for the languages step's choice-pool
+/// fallback — languages are DB-backed (unlike skills' compile-time `SKILLS`
+/// constant), so the wizard needs this to resolve `Any`/exhausted-`Choose`
+/// pools to real names.
+#[server]
+pub async fn get_languages() -> Result<Vec<crate::models::language::Language>, ServerFnError> {
+    use sqlx::SqlitePool;
+
+    let pool = expect_context::<SqlitePool>();
+    crate::db::list_languages(&pool).await.map_err(|err| ServerFnError::new(err.to_string()))
+}
+
+/// Real tool item names for each `ToolCategory`, resolved from the `items`
+/// table's `item_type_code` rather than a hardcoded list — feeds the tools
+/// step's category-scoped choice pools (`anyArtisansTool`, ...). Returned as
+/// pairs rather than a map since `ToolCategory` isn't a string-keyable JSON
+/// map key.
+#[server]
+pub async fn get_tool_category_members() -> Result<Vec<(ToolCategory, Vec<String>)>, ServerFnError> {
+    use sqlx::SqlitePool;
+
+    let pool = expect_context::<SqlitePool>();
+    let mut members = Vec::new();
+    for category in [ToolCategory::ArtisansTool, ToolCategory::GamingSet, ToolCategory::MusicalInstrument] {
+        let items = crate::db::list_items_by_type_code(&pool, category.item_type_code())
+            .await
+            .map_err(|err| ServerFnError::new(err.to_string()))?;
+        members.push((category, items.into_iter().map(|item| item.name).collect()));
+    }
+    Ok(members)
 }
 
 // input = Json: the default URL-encoded codec drops empty vecs and None
@@ -124,6 +159,10 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
         .await
         .map_err(|err| ServerFnError::new(err.to_string()))?
         .ok_or_else(|| ServerFnError::new("Unknown background"))?;
+    let species = crate::db::get_species(&pool, &character.species_id)
+        .await
+        .map_err(|err| ServerFnError::new(err.to_string()))?
+        .ok_or_else(|| ServerFnError::new("Unknown species"))?;
     let class_lookup: HashMap<String, Class> =
         class_details.iter().map(|(id, detail)| (id.clone(), detail.class.clone())).collect();
     let combined_class_skills = multiclass_class_skill_grants(&character.classes, &class_lookup);
@@ -161,16 +200,60 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
         ));
     }
 
+    // Same reasoning again, for languages and tools: re-derive both slot
+    // sets from the DB-fetched classes+background+species so a direct POST
+    // can't persist choices the wizard's own UI wouldn't have offered.
+    let combined_class_tools = multiclass_class_tool_grants(&character.classes, &class_lookup);
+    let background_tools: Vec<(String, ToolGrant)> =
+        background.tools.iter().cloned().map(|grant| (background.name.clone(), grant)).collect();
+    let mut category_members = HashMap::new();
+    for category in [ToolCategory::ArtisansTool, ToolCategory::GamingSet, ToolCategory::MusicalInstrument] {
+        let items = crate::db::list_items_by_type_code(&pool, category.item_type_code())
+            .await
+            .map_err(|err| ServerFnError::new(err.to_string()))?;
+        category_members.insert(category, items.into_iter().map(|item| item.name).collect());
+    }
+    let tool_pick_slots = tool_slots(&combined_class_tools, &background_tools, &category_members);
+    let tool_choices_valid = character.tool_choices.len() == tool_pick_slots.choice_pools.len()
+        && character
+            .tool_choices
+            .iter()
+            .zip(&tool_pick_slots.choice_pools)
+            .all(|(choice, pool)| pool.options.contains(choice));
+    if !tool_choices_valid {
+        return Err(ServerFnError::new(
+            "Tool choices don't match what's unlocked for these classes and background",
+        ));
+    }
+
+    let background_languages: Vec<(String, LanguageGrant)> =
+        background.languages.iter().cloned().map(|grant| (background.name.clone(), grant)).collect();
+    let species_languages: Vec<(String, LanguageGrant)> =
+        species.languages.iter().cloned().map(|grant| (species.name.clone(), grant)).collect();
+    let all_languages: Vec<String> =
+        crate::db::list_languages(&pool).await.map_err(|err| ServerFnError::new(err.to_string()))?
+            .into_iter()
+            .map(|language| language.name)
+            .collect();
+    let language_pick_slots = language_slots(&background_languages, &species_languages, &all_languages);
+    let language_choices_valid = character.language_choices.len() == language_pick_slots.choice_pools.len()
+        && character
+            .language_choices
+            .iter()
+            .zip(&language_pick_slots.choice_pools)
+            .all(|(choice, pool)| pool.options.contains(choice));
+    if !language_choices_valid {
+        return Err(ServerFnError::new(
+            "Language choices don't match what's unlocked for this background and species",
+        ));
+    }
+
     // Same reasoning again: re-derive the species' ability-bonus grant so a
     // direct POST can't persist a `species_ability_choices` pick the
     // wizard's own UI wouldn't have offered (wrong count, wrong ability, or
     // any pick at all for a species with no Choose grant) — or, in Custom
     // mode, a bonus that doesn't match the "exactly two valid abilities"
     // shape the wizard's Custom toggle offers.
-    let species = crate::db::get_species(&pool, &character.species_id)
-        .await
-        .map_err(|err| ServerFnError::new(err.to_string()))?
-        .ok_or_else(|| ServerFnError::new("Unknown species"))?;
     let ability_bonus_valid = match character.ability_bonus_source {
         AbilityBonusSource::Species => {
             if !character.custom_ability_bonus_choices.is_empty() {
@@ -432,13 +515,15 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
     Ok(character.id)
 }
 
-const STEPS: [&str; 10] = [
+const STEPS: [&str; 12] = [
     "Basics",
     "Class",
     "Optional Features",
     "Species",
     "Background",
     "Skills",
+    "Languages",
+    "Tools",
     "Abilities",
     "Spells",
     "Feats & ASIs",
@@ -531,6 +616,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
     let asi_choices = RwSignal::new(Vec::<Option<AsiChoice>>::new());
     let skill_choices = RwSignal::new(Vec::<Option<String>>::new());
     let expertise_choices = RwSignal::new(Vec::<Option<String>>::new());
+    let language_choices = RwSignal::new(Vec::<Option<String>>::new());
+    let tool_choices = RwSignal::new(Vec::<Option<String>>::new());
     let cantrip_choices = RwSignal::new(Vec::<String>::new());
     let spell_choices = RwSignal::new(Vec::<String>::new());
     let spell_grant_choices = RwSignal::new(Vec::<Option<String>>::new());
@@ -665,6 +752,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             asi_choices.set(existing.asi_choices);
             skill_choices.set(existing.skill_choices.into_iter().map(Some).collect());
             expertise_choices.set(existing.expertise_choices.into_iter().map(Some).collect());
+            language_choices.set(existing.language_choices.into_iter().map(Some).collect());
+            tool_choices.set(existing.tool_choices.into_iter().map(Some).collect());
             cantrip_choices.set(existing.cantrip_choices);
             spell_choices.set(existing.spell_choices);
             spell_grant_choices.set(existing.spell_grant_choices.into_iter().map(Some).collect());
@@ -711,6 +800,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             asi_choices: asi_choices.get(),
             skill_choices: skill_choices.get().into_iter().flatten().collect(),
             expertise_choices: expertise_choices.get().into_iter().flatten().collect(),
+            language_choices: language_choices.get().into_iter().flatten().collect(),
+            tool_choices: tool_choices.get().into_iter().flatten().collect(),
             cantrip_choices: cantrip_choices.get(),
             spell_choices: spell_choices.get(),
             spell_grant_choices: spell_grant_choices.get().into_iter().flatten().collect(),
@@ -889,6 +980,123 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         rows.sort_by(|a, b| skill_label(&a.0).cmp(&skill_label(&b.0)));
         rows
     });
+
+    // Languages are DB-backed (unlike skills' compile-time `SKILLS`), so the
+    // full reference list is fetched once and reused as the fallback pool.
+    let language_list =
+        Resource::new(|| (), |_| async move { get_languages().await });
+    let all_language_names = move || -> Vec<String> {
+        language_list.get().and_then(|r| r.ok()).map(|langs| langs.into_iter().map(|l| l.name).collect()).unwrap_or_default()
+    };
+    let language_inputs = Memo::new(move |_| {
+        let background_languages: Vec<(String, LanguageGrant)> = background_detail
+            .get()
+            .and_then(|result| result.ok())
+            .flatten()
+            .map(|b| b.languages.iter().cloned().map(|grant| (b.name.clone(), grant)).collect())
+            .unwrap_or_default();
+        let species_languages: Vec<(String, LanguageGrant)> = species_detail
+            .get()
+            .and_then(|result| result.ok())
+            .flatten()
+            .map(|s| s.languages.iter().cloned().map(|grant| (s.name.clone(), grant)).collect())
+            .unwrap_or_default();
+        language_slots(&background_languages, &species_languages, &all_language_names())
+    });
+    let language_proficiency_sources = Memo::new(move |_| -> Vec<(String, Vec<String>)> {
+        let background_languages: Vec<(String, LanguageGrant)> = background_detail
+            .get()
+            .and_then(|result| result.ok())
+            .flatten()
+            .map(|b| b.languages.iter().cloned().map(|grant| (b.name.clone(), grant)).collect())
+            .unwrap_or_default();
+        let species_languages: Vec<(String, LanguageGrant)> = species_detail
+            .get()
+            .and_then(|result| result.ok())
+            .flatten()
+            .map(|s| s.languages.iter().cloned().map(|grant| (s.name.clone(), grant)).collect())
+            .unwrap_or_default();
+
+        let mut sources: HashMap<String, Vec<String>> = HashMap::new();
+        for (source, grant) in background_languages.iter().chain(species_languages.iter()) {
+            if let LanguageGrant::Fixed { languages } = grant {
+                for language in languages {
+                    let entry = sources.entry(language.clone()).or_default();
+                    if !entry.contains(source) {
+                        entry.push(source.clone());
+                    }
+                }
+            }
+        }
+        let slots = language_inputs.get();
+        for (choice, pool) in language_choices.get().iter().zip(slots.choice_pools.iter()) {
+            if let Some(language) = choice {
+                let entry = sources.entry(language.clone()).or_default();
+                if !entry.contains(&pool.source) {
+                    entry.push(pool.source.clone());
+                }
+            }
+        }
+        let mut rows: Vec<(String, Vec<String>)> = sources.into_iter().collect();
+        rows.sort_by(|a, b| title_case(&a.0).cmp(&title_case(&b.0)));
+        rows
+    });
+
+    // Real tool item names per category, resolved from the `items` table —
+    // fetched once and reused to expand `ToolOption::Category`/`AnyCategory`
+    // grants into concrete choosable options.
+    let tool_category_members = Resource::new(|| (), |_| async move { get_tool_category_members().await });
+    let category_members_map = move || -> HashMap<ToolCategory, Vec<String>> {
+        tool_category_members.get().and_then(|r| r.ok()).map(|pairs| pairs.into_iter().collect()).unwrap_or_default()
+    };
+    let tool_inputs = Memo::new(move |_| {
+        let class_lookup: HashMap<String, Class> =
+            class_details_map().into_iter().map(|(id, detail)| (id, detail.class)).collect();
+        let combined_class_tools = multiclass_class_tool_grants(&classes.get(), &class_lookup);
+        let background_tools: Vec<(String, ToolGrant)> = background_detail
+            .get()
+            .and_then(|result| result.ok())
+            .flatten()
+            .map(|b| b.tools.iter().cloned().map(|grant| (b.name.clone(), grant)).collect())
+            .unwrap_or_default();
+        tool_slots(&combined_class_tools, &background_tools, &category_members_map())
+    });
+    let tool_proficiency_sources = Memo::new(move |_| -> Vec<(String, Vec<String>)> {
+        let class_lookup: HashMap<String, Class> =
+            class_details_map().into_iter().map(|(id, detail)| (id, detail.class)).collect();
+        let combined_class_tools = multiclass_class_tool_grants(&classes.get(), &class_lookup);
+        let background_tools: Vec<(String, ToolGrant)> = background_detail
+            .get()
+            .and_then(|result| result.ok())
+            .flatten()
+            .map(|b| b.tools.iter().cloned().map(|grant| (b.name.clone(), grant)).collect())
+            .unwrap_or_default();
+
+        let mut sources: HashMap<String, Vec<String>> = HashMap::new();
+        for (source, grant) in combined_class_tools.iter().chain(background_tools.iter()) {
+            if let ToolGrant::Fixed { tools } = grant {
+                for tool in tools {
+                    let entry = sources.entry(tool.clone()).or_default();
+                    if !entry.contains(source) {
+                        entry.push(source.clone());
+                    }
+                }
+            }
+        }
+        let slots = tool_inputs.get();
+        for (choice, pool) in tool_choices.get().iter().zip(slots.choice_pools.iter()) {
+            if let Some(tool) = choice {
+                let entry = sources.entry(tool.clone()).or_default();
+                if !entry.contains(&pool.source) {
+                    entry.push(pool.source.clone());
+                }
+            }
+        }
+        let mut rows: Vec<(String, Vec<String>)> = sources.into_iter().collect();
+        rows.sort_by(|a, b| title_case(&a.0).cmp(&title_case(&b.0)));
+        rows
+    });
+
     let background_ready = move || match background_id.get() {
         None => true,
         Some(id) => background_detail
@@ -964,6 +1172,42 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             choices.resize(count, None);
             for choice in choices.iter_mut() {
                 if choice.as_ref().is_some_and(|skill| !proficient.contains(skill)) {
+                    *choice = None;
+                }
+            }
+        });
+    });
+
+    // Same reasoning as the skill_choices resize effect — a background or
+    // species change can add/remove language slots or make a pick redundant.
+    Effect::new(move |_| {
+        if !background_ready() || !species_ready() {
+            return;
+        }
+        let slots = language_inputs.get();
+        let pools = slots.choice_pools;
+        language_choices.update(|choices| {
+            choices.resize(pools.len(), None);
+            for (choice, pool) in choices.iter_mut().zip(pools.iter()) {
+                if choice.as_ref().is_some_and(|language| !pool.options.contains(language) || slots.fixed.contains(language)) {
+                    *choice = None;
+                }
+            }
+        });
+    });
+
+    // Same reasoning again — a class or background change can add/remove
+    // tool slots or make a pick redundant.
+    Effect::new(move |_| {
+        if !class_details_ready() || !background_ready() {
+            return;
+        }
+        let slots = tool_inputs.get();
+        let pools = slots.choice_pools;
+        tool_choices.update(|choices| {
+            choices.resize(pools.len(), None);
+            for (choice, pool) in choices.iter_mut().zip(pools.iter()) {
+                if choice.as_ref().is_some_and(|tool| !pool.options.contains(tool) || slots.fixed.contains(tool)) {
                     *choice = None;
                 }
             }
@@ -1306,12 +1550,16 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                 .then_some("No optional features to choose for this class/subclass yet."),
             5 => (skill_inputs.get().choice_pools.is_empty() && expertise_slot_count.get() == 0)
                 .then_some("No skill or expertise choices to make yet — pick a class and background first."),
-            7 => resolved_entries
+            6 => language_inputs.get().choice_pools.is_empty()
+                .then_some("No language choices to make yet — pick a background and species first."),
+            7 => tool_inputs.get().choice_pools.is_empty()
+                .then_some("No tool choices to make yet — pick a class and background first."),
+            9 => resolved_entries
                 .get()
                 .iter()
                 .all(|e| e.spellcasting.caster_progression.is_none())
                 .then_some("This build doesn't grant spellcasting."),
-            8 => asi_entries.get().is_empty().then_some("No Ability Score Improvements unlocked yet."),
+            10 => asi_entries.get().is_empty().then_some("No Ability Score Improvements unlocked yet."),
             _ => None,
         }
     };
@@ -1357,6 +1605,10 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             skill_choices.get().into_iter().flatten().map(|skill| skill_label(&skill)).collect::<Vec<_>>();
         let expertise_names =
             expertise_choices.get().into_iter().flatten().map(|skill| skill_label(&skill)).collect::<Vec<_>>();
+        let language_names =
+            language_choices.get().into_iter().flatten().map(|language| title_case(&language)).collect::<Vec<_>>();
+        let tool_names =
+            tool_choices.get().into_iter().flatten().map(|tool| title_case(&tool)).collect::<Vec<_>>();
 
         let feats = feat_list.get().and_then(|result| result.ok()).unwrap_or_default();
         let asi_lines = asi_entries
@@ -1415,6 +1667,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             subtitle: parts.join(" · "),
             skill_choices: skill_names,
             expertise_choices: expertise_names,
+            language_choices: language_names,
+            tool_choices: tool_names,
             asi_lines,
             cantrips: cantrip_names,
             spells: spell_names,
@@ -1461,6 +1715,14 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                 && expertise_choices.get().iter().all(Option::is_some)
         }
         6 => {
+            language_choices.get().len() == language_inputs.get().choice_pools.len()
+                && language_choices.get().iter().all(Option::is_some)
+        }
+        7 => {
+            tool_choices.get().len() == tool_inputs.get().choice_pools.len()
+                && tool_choices.get().iter().all(Option::is_some)
+        }
+        8 => {
             let method_ok = match ability_method.get() {
                 AbilityMethod::PointBuy => point_buy_spent() <= POINT_BUY_BUDGET as u32,
                 _ => true,
@@ -1478,13 +1740,13 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             };
             method_ok && ability_bonus_ok
         }
-        7 => {
+        9 => {
             cantrip_choices.get().len() == total_cantrips_required()
                 && spell_choices.get().len() == total_spells_required()
                 && spell_grant_choices.get().len() == spell_choice_slots.get().len()
                 && spell_grant_choices.get().iter().all(Option::is_some)
         }
-        8 => {
+        10 => {
             asi_choices.get().len() == asi_entries.get().len()
                 && asi_choices.get().iter().all(|choice| match choice {
                     Some(AsiChoice::Feat { feat_id }) => !feat_id.trim().is_empty(),
@@ -1607,6 +1869,22 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                                 .into_any()
                         }
                         6 => {
+                            languages_step(
+                                    language_inputs,
+                                    language_choices,
+                                    language_proficiency_sources,
+                                )
+                                .into_any()
+                        }
+                        7 => {
+                            tools_step(
+                                    tool_inputs,
+                                    tool_choices,
+                                    tool_proficiency_sources,
+                                )
+                                .into_any()
+                        }
+                        8 => {
                             abilities_step(
                                     ability_method,
                                     abilities,
@@ -1617,7 +1895,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                                 )
                                 .into_any()
                         }
-                        7 => {
+                        9 => {
                             spells_step(
                                     resolved_entries,
                                     spell_options_all,
@@ -1631,7 +1909,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                                 )
                                 .into_any()
                         }
-                        8 => {
+                        10 => {
                             asi_step(
                                     resolved_entries,
                                     asi_entries,

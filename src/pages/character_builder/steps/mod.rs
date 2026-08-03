@@ -3,22 +3,26 @@ mod asi;
 mod background;
 mod basics;
 mod class;
+mod languages;
 mod optional_features;
 mod review;
 mod skills;
 mod species;
 mod spells;
+mod tools;
 
 pub use abilities::abilities_step;
 pub use asi::asi_step;
 pub use background::background_step;
 pub use basics::basics_step;
 pub use class::class_step;
+pub use languages::languages_step;
 pub use optional_features::{optional_features_step, OptionalFeaturePoolResource};
 pub use review::{review_step, ReviewSummary};
 pub use skills::skills_step;
 pub use species::species_step;
 pub use spells::spells_step;
+pub use tools::tools_step;
 
 use leptos::prelude::*;
 

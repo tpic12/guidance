@@ -1,11 +1,13 @@
 use crate::components::entry_view::entry_view;
 use crate::models::character::{
-    ability_modifier, active_subclass, asi_levels, effective_spellcasting, final_abilities,
+    ability_modifier, active_subclass, asi_levels, effective_spellcasting, final_abilities, language_slots,
     multiclass_class_skill_grants, multiclass_pact_slots, multiclass_spell_slots, proficiency_bonus,
-    resolved_hp_max_multiclass, skill_slots, spell_attack_bonus, spell_save_dc, total_level, AsiChoice,
+    resolved_hp_max_multiclass, skill_slots, spell_attack_bonus, spell_save_dc, tool_slots, total_level, AsiChoice,
     CharacterSheet, ClassLevel, SpellcastingProfile, ABILITY_CODES,
 };
 use crate::models::class::{ability_label, Class, ClassDetail, ClassFeature, SubclassDetail};
+use crate::models::language::LanguageGrant;
+use crate::models::proficiency::{title_case, ToolGrant};
 use crate::models::skill::{skill_label, SkillGrant, SKILLS};
 use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
@@ -554,7 +556,10 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                     .then(|| {
                         let mut armor = Vec::new();
                         let mut weapons = Vec::new();
-                        let mut tools = Vec::new();
+                        // Class + background grants combined, same as `tool_inputs` in the
+                        // wizard — fixed grants merged with the player's actual picks
+                        // (unlike Armor/Weapons, which have no player-choice slots).
+                        let mut tool_grants: Vec<(String, ToolGrant)> = Vec::new();
                         for (index, rc) in resolved_classes.iter().enumerate() {
                             let profs = if index == 0 {
                                 &rc.detail.class.proficiencies
@@ -563,12 +568,21 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                             };
                             armor.extend(profs.armor.iter().cloned());
                             weapons.extend(profs.weapons.iter().cloned());
-                            tools.extend(profs.tools.iter().cloned());
+                            tool_grants.extend(profs.tools.iter().cloned().map(|g| (rc.detail.class.name.clone(), g)));
                         }
-                        for list in [&mut armor, &mut weapons, &mut tools] {
+                        if let Some(background) = &sheet.background {
+                            tool_grants
+                                .extend(background.tools.iter().cloned().map(|g| (background.name.clone(), g)));
+                        }
+                        for list in [&mut armor, &mut weapons] {
                             let mut seen = HashSet::new();
                             list.retain(|item| seen.insert(item.clone()));
                         }
+                        let mut tools: HashSet<String> =
+                            tool_slots(&tool_grants, &[], &HashMap::new()).fixed.into_iter().collect();
+                        tools.extend(character.tool_choices.iter().cloned());
+                        let mut tools: Vec<String> = tools.into_iter().map(|t| title_case(&t)).collect();
+                        tools.sort();
                         let line = |label: &str, value: String| {
                             (!value.is_empty())
                                 .then(|| {
@@ -588,27 +602,33 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                             {line("Tools", tools.join(", "))}
                         }
                     })}
-                {sheet
-                    .background
-                    .as_ref()
-                    .map(|background| {
-                        let line = |label: &str, value: String| {
-                            (!value.is_empty())
-                                .then(|| {
-                                    let label = label.to_string();
-                                    view! {
-                                        <p class="text-sm">
-                                            <span class="font-semibold">{label} ": "</span>
-                                            {value}
-                                        </p>
-                                    }
-                                })
-                        };
-                        view! {
-                            {line("Languages", background.languages.join(", "))}
-                            {line("Background tools", background.tools.join(", "))}
-                        }
-                    })}
+                {{
+                    // Background + species grants combined, same as `language_inputs`
+                    // in the wizard — fixed grants merged with the player's picks.
+                    let mut language_grants: Vec<(String, LanguageGrant)> = Vec::new();
+                    if let Some(background) = &sheet.background {
+                        language_grants
+                            .extend(background.languages.iter().cloned().map(|g| (background.name.clone(), g)));
+                    }
+                    if let Some(species) = &sheet.species {
+                        language_grants
+                            .extend(species.languages.iter().cloned().map(|g| (species.name.clone(), g)));
+                    }
+                    let mut languages: HashSet<String> =
+                        language_slots(&language_grants, &[], &[]).fixed.into_iter().collect();
+                    languages.extend(character.language_choices.iter().cloned());
+                    let mut languages: Vec<String> = languages.into_iter().map(|l| title_case(&l)).collect();
+                    languages.sort();
+                    (!languages.is_empty())
+                        .then(|| {
+                            view! {
+                                <p class="text-sm">
+                                    <span class="font-semibold">"Languages: "</span>
+                                    {languages.join(", ")}
+                                </p>
+                            }
+                        })
+                }}
             </div>
         </div>
 

@@ -103,6 +103,7 @@ fn species(name: &str, source: &str, ability: Option<&str>) -> Species {
         size: Some("Medium".to_string()),
         speed: Some("30 ft.".to_string()),
         darkvision: None,
+        languages: vec![],
         entries: vec![],
     }
 }
@@ -736,6 +737,27 @@ async fn get_item_round_trips_and_missing_id_is_none() {
     assert!(get_item(&pool, "nope").await.unwrap().is_none());
 }
 
+#[tokio::test]
+async fn list_items_by_type_code_filters_on_the_raw_code_not_the_display_label() {
+    let pool = test_pool().await;
+    let mut alchemists_supplies = item("Alchemist's Supplies", "PHB");
+    alchemists_supplies.item_type_code = Some("AT".to_string());
+    alchemists_supplies.item_type_label = Some("Artisan's Tools".to_string());
+    insert_item(&pool, &alchemists_supplies).await;
+
+    let mut lute = item("Lute", "PHB");
+    lute.item_type_code = Some("INS".to_string());
+    lute.item_type_label = Some("Musical Instrument".to_string());
+    insert_item(&pool, &lute).await;
+
+    insert_item(&pool, &item("Dagger", "PHB")).await;
+
+    let artisans_tools = list_items_by_type_code(&pool, "AT").await.unwrap();
+    assert_eq!(artisans_tools.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(), vec!["Alchemist's Supplies"]);
+
+    assert!(list_items_by_type_code(&pool, "GS").await.unwrap().is_empty());
+}
+
 fn character(id: &str, name: &str) -> Character {
     Character {
         id: id.to_string(),
@@ -753,6 +775,8 @@ fn character(id: &str, name: &str) -> Character {
         asi_choices: vec![Some(AsiChoice::Feat { feat_id: "grappler".to_string() })],
         skill_choices: vec![],
         expertise_choices: vec![],
+        language_choices: vec![],
+        tool_choices: vec![],
         cantrip_choices: vec![],
         spell_choices: vec![],
         spell_grant_choices: vec![],

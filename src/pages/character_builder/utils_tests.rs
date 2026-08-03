@@ -13,6 +13,7 @@ fn species(id: &str, name: &str, source: &str) -> Species {
         size: None,
         speed: None,
         darkvision: None,
+        languages: vec![],
         entries: vec![],
     }
 }
