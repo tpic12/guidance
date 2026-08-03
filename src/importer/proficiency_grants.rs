@@ -2,6 +2,11 @@
 //! class tools, background languages/tools, and species languages alike:
 //! each element is a map of a fixed proficiency (name -> `true`), an "any"
 //! wildcard, or a `choose` object with a `from` list.
+//!
+//! Iteration order over each grant's key/value pairs relies on
+//! `serde_json::Map`'s default `BTreeMap` (sorted-key) backing for
+//! deterministic `fixed` ordering — true as long as `preserve_order` isn't
+//! enabled anywhere in the dependency tree (it currently isn't).
 use crate::models::language::LanguageGrant;
 use crate::models::proficiency::{ToolCategory, ToolGrant, ToolOption};
 use serde_json::Value;
