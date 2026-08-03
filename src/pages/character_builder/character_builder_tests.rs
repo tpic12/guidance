@@ -1,4 +1,4 @@
-use super::attribute_multiclass_choices;
+use super::utils::attribute_multiclass_choices;
 
 fn pool(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
