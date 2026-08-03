@@ -2,10 +2,14 @@ use crate::models::character::{ToolChoicePool, ToolSlots};
 use crate::models::proficiency::{contains_ignore_case, title_case};
 use leptos::prelude::*;
 
+use super::custom_proficiency_section;
+
 pub fn tools_step(
     tool_inputs: Memo<ToolSlots>,
     tool_choices: RwSignal<Vec<Option<String>>>,
     tool_proficiency_sources: Memo<Vec<(String, Vec<String>)>>,
+    custom_tool_choices: RwSignal<Vec<String>>,
+    all_tool_names: impl Fn() -> Vec<String> + Send + Sync + Copy + 'static,
 ) -> impl IntoView {
     view! {
         <h2 class="card-title">"Tool Proficiencies"</h2>
@@ -58,8 +62,28 @@ pub fn tools_step(
         <For
             each=move || tool_inputs.get().choice_pools.into_iter().enumerate()
             key=|(slot, _)| *slot
-            children=move |(slot, pool)| tool_slot(slot, pool, tool_inputs, tool_choices)
+            children=move |(slot, pool)| {
+                tool_slot(slot, pool, tool_inputs, tool_choices, custom_tool_choices)
+            }
         />
+        {custom_proficiency_section(
+            "Custom Tool Proficiencies",
+            custom_tool_choices,
+            move || {
+                let granted = tool_inputs.get().fixed;
+                let chosen: Vec<String> = tool_choices.get().into_iter().flatten().collect();
+                let custom = custom_tool_choices.get();
+                all_tool_names()
+                    .into_iter()
+                    .filter(|name| {
+                        !contains_ignore_case(&granted, name)
+                            && !contains_ignore_case(&chosen, name)
+                            && !contains_ignore_case(&custom, name)
+                    })
+                    .collect()
+            },
+            |tool| title_case(tool),
+        )}
     }
 }
 
@@ -68,6 +92,7 @@ fn tool_slot(
     pool: ToolChoicePool,
     tool_inputs: Memo<ToolSlots>,
     tool_choices: RwSignal<Vec<Option<String>>>,
+    custom_tool_choices: RwSignal<Vec<String>>,
 ) -> impl IntoView {
     let choice = move || tool_choices.get().get(slot).cloned().flatten();
     let set_choice = move |value: Option<String>| {
@@ -77,11 +102,13 @@ fn tool_slot(
             }
         });
     };
-    // Disabled once picked in a sibling slot, or once already granted
-    // outright by class/background — picking it here would just waste the
-    // slot on a proficiency the character already has.
+    // Disabled once picked in a sibling slot, already granted outright by
+    // class/background, or already added as a custom proficiency — picking
+    // it here would just waste the slot on a proficiency the character
+    // already has.
     let is_disabled = move |opt: &str| {
         contains_ignore_case(&tool_inputs.get().fixed, opt)
+            || contains_ignore_case(&custom_tool_choices.get(), opt)
             || tool_choices
                 .get()
                 .iter()

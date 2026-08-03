@@ -190,6 +190,7 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
         .iter()
         .map(String::as_str)
         .chain(character.skill_choices.iter().map(String::as_str))
+        .chain(character.custom_skill_proficiencies.iter().map(String::as_str))
         .collect();
     let needed_expertise = multiclass_expertise_slots(&character.classes, &features_by_class);
     let expertise_valid = character.expertise_choices.len() == needed_expertise
@@ -618,6 +619,9 @@ pub fn CharacterBuilderPage() -> impl IntoView {
     let expertise_choices = RwSignal::new(Vec::<Option<String>>::new());
     let language_choices = RwSignal::new(Vec::<Option<String>>::new());
     let tool_choices = RwSignal::new(Vec::<Option<String>>::new());
+    let custom_skill_choices = RwSignal::new(Vec::<String>::new());
+    let custom_language_choices = RwSignal::new(Vec::<String>::new());
+    let custom_tool_choices = RwSignal::new(Vec::<String>::new());
     let cantrip_choices = RwSignal::new(Vec::<String>::new());
     let spell_choices = RwSignal::new(Vec::<String>::new());
     let spell_grant_choices = RwSignal::new(Vec::<Option<String>>::new());
@@ -754,6 +758,9 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             expertise_choices.set(existing.expertise_choices.into_iter().map(Some).collect());
             language_choices.set(existing.language_choices.into_iter().map(Some).collect());
             tool_choices.set(existing.tool_choices.into_iter().map(Some).collect());
+            custom_skill_choices.set(existing.custom_skill_proficiencies);
+            custom_language_choices.set(existing.custom_language_proficiencies);
+            custom_tool_choices.set(existing.custom_tool_proficiencies);
             cantrip_choices.set(existing.cantrip_choices);
             spell_choices.set(existing.spell_choices);
             spell_grant_choices.set(existing.spell_grant_choices.into_iter().map(Some).collect());
@@ -802,6 +809,9 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             expertise_choices: expertise_choices.get().into_iter().flatten().collect(),
             language_choices: language_choices.get().into_iter().flatten().collect(),
             tool_choices: tool_choices.get().into_iter().flatten().collect(),
+            custom_skill_proficiencies: custom_skill_choices.get(),
+            custom_language_proficiencies: custom_language_choices.get(),
+            custom_tool_proficiencies: custom_tool_choices.get(),
             cantrip_choices: cantrip_choices.get(),
             spell_choices: spell_choices.get(),
             spell_grant_choices: spell_grant_choices.get().into_iter().flatten().collect(),
@@ -1048,6 +1058,12 @@ pub fn CharacterBuilderPage() -> impl IntoView {
     let tool_category_members = Resource::new(|| (), |_| async move { get_tool_category_members().await });
     let category_members_map = move || -> HashMap<ToolCategory, Vec<String>> {
         tool_category_members.get().and_then(|r| r.ok()).map(|pairs| pairs.into_iter().collect()).unwrap_or_default()
+    };
+    let all_tool_names = move || -> Vec<String> {
+        let mut names: Vec<String> = category_members_map().values().flatten().cloned().collect();
+        names.sort();
+        names.dedup();
+        names
     };
     let tool_inputs = Memo::new(move |_| {
         let class_lookup: HashMap<String, Class> =
@@ -1601,14 +1617,23 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             parts.push(background.name.clone());
         }
 
-        let skill_names =
+        let mut skill_names =
             skill_choices.get().into_iter().flatten().map(|skill| skill_label(&skill)).collect::<Vec<_>>();
+        skill_names.extend(
+            custom_skill_choices.get().iter().map(|skill| format!("{} (Custom)", skill_label(skill))),
+        );
         let expertise_names =
             expertise_choices.get().into_iter().flatten().map(|skill| skill_label(&skill)).collect::<Vec<_>>();
-        let language_names =
+        let mut language_names =
             language_choices.get().into_iter().flatten().map(|language| title_case(&language)).collect::<Vec<_>>();
-        let tool_names =
+        language_names.extend(
+            custom_language_choices.get().iter().map(|language| format!("{} (Custom)", title_case(language))),
+        );
+        let mut tool_names =
             tool_choices.get().into_iter().flatten().map(|tool| title_case(&tool)).collect::<Vec<_>>();
+        tool_names.extend(
+            custom_tool_choices.get().iter().map(|tool| format!("{} (Custom)", title_case(tool))),
+        );
 
         let feats = feat_list.get().and_then(|result| result.ok()).unwrap_or_default();
         let asi_lines = asi_entries
@@ -1865,6 +1890,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                                     expertise_slot_count,
                                     expertise_choices,
                                     skill_proficiency_sources,
+                                    custom_skill_choices,
                                 )
                                 .into_any()
                         }
@@ -1873,6 +1899,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                                     language_inputs,
                                     language_choices,
                                     language_proficiency_sources,
+                                    custom_language_choices,
+                                    all_language_names,
                                 )
                                 .into_any()
                         }
@@ -1881,6 +1909,8 @@ pub fn CharacterBuilderPage() -> impl IntoView {
                                     tool_inputs,
                                     tool_choices,
                                     tool_proficiency_sources,
+                                    custom_tool_choices,
+                                    all_tool_names,
                                 )
                                 .into_any()
                         }

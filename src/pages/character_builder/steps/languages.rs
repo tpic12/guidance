@@ -2,10 +2,14 @@ use crate::models::character::{LanguageChoicePool, LanguageSlots};
 use crate::models::proficiency::{contains_ignore_case, title_case};
 use leptos::prelude::*;
 
+use super::custom_proficiency_section;
+
 pub fn languages_step(
     language_inputs: Memo<LanguageSlots>,
     language_choices: RwSignal<Vec<Option<String>>>,
     language_proficiency_sources: Memo<Vec<(String, Vec<String>)>>,
+    custom_language_choices: RwSignal<Vec<String>>,
+    all_language_names: impl Fn() -> Vec<String> + Send + Sync + Copy + 'static,
 ) -> impl IntoView {
     view! {
         <h2 class="card-title">"Languages"</h2>
@@ -58,8 +62,28 @@ pub fn languages_step(
         <For
             each=move || language_inputs.get().choice_pools.into_iter().enumerate()
             key=|(slot, _)| *slot
-            children=move |(slot, pool)| language_slot(slot, pool, language_inputs, language_choices)
+            children=move |(slot, pool)| {
+                language_slot(slot, pool, language_inputs, language_choices, custom_language_choices)
+            }
         />
+        {custom_proficiency_section(
+            "Custom Languages",
+            custom_language_choices,
+            move || {
+                let granted = language_inputs.get().fixed;
+                let chosen: Vec<String> = language_choices.get().into_iter().flatten().collect();
+                let custom = custom_language_choices.get();
+                all_language_names()
+                    .into_iter()
+                    .filter(|name| {
+                        !contains_ignore_case(&granted, name)
+                            && !contains_ignore_case(&chosen, name)
+                            && !contains_ignore_case(&custom, name)
+                    })
+                    .collect()
+            },
+            |language| title_case(language),
+        )}
     }
 }
 
@@ -68,6 +92,7 @@ fn language_slot(
     pool: LanguageChoicePool,
     language_inputs: Memo<LanguageSlots>,
     language_choices: RwSignal<Vec<Option<String>>>,
+    custom_language_choices: RwSignal<Vec<String>>,
 ) -> impl IntoView {
     let choice = move || language_choices.get().get(slot).cloned().flatten();
     let set_choice = move |value: Option<String>| {
@@ -77,11 +102,13 @@ fn language_slot(
             }
         });
     };
-    // Disabled once picked in a sibling slot, or once already granted
-    // outright by background/species — picking it here would just waste the
-    // slot on a language the character already knows.
+    // Disabled once picked in a sibling slot, already granted outright by
+    // background/species, or already added as a custom proficiency —
+    // picking it here would just waste the slot on a language the character
+    // already knows.
     let is_disabled = move |opt: &str| {
         contains_ignore_case(&language_inputs.get().fixed, opt)
+            || contains_ignore_case(&custom_language_choices.get(), opt)
             || language_choices
                 .get()
                 .iter()

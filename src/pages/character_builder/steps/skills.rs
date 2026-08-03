@@ -1,6 +1,8 @@
 use crate::models::character::{SkillChoicePool, SkillSlots};
-use crate::models::skill::skill_label;
+use crate::models::skill::{skill_label, SKILLS};
 use leptos::prelude::*;
+
+use super::custom_proficiency_section;
 
 pub fn skills_step(
     skill_inputs: Memo<SkillSlots>,
@@ -8,6 +10,7 @@ pub fn skills_step(
     expertise_slot_count: Memo<usize>,
     expertise_choices: RwSignal<Vec<Option<String>>>,
     skill_proficiency_sources: Memo<Vec<(String, Vec<String>)>>,
+    custom_skill_choices: RwSignal<Vec<String>>,
 ) -> impl IntoView {
     view! {
         <h2 class="card-title">"Skill Proficiencies"</h2>
@@ -64,8 +67,27 @@ pub fn skills_step(
         <For
             each=move || skill_inputs.get().choice_pools.into_iter().enumerate()
             key=|(slot, _)| *slot
-            children=move |(slot, pool)| skill_slot(slot, pool, skill_inputs, skill_choices)
+            children=move |(slot, pool)| {
+                skill_slot(slot, pool, skill_inputs, skill_choices, custom_skill_choices)
+            }
         />
+        {custom_proficiency_section(
+            "Custom Skill Proficiencies",
+            custom_skill_choices,
+            move || {
+                let granted = skill_inputs.get().fixed;
+                let chosen: Vec<String> = skill_choices.get().into_iter().flatten().collect();
+                let custom = custom_skill_choices.get();
+                SKILLS
+                    .iter()
+                    .map(|(name, _)| name.to_string())
+                    .filter(|name| {
+                        !granted.contains(name) && !chosen.contains(name) && !custom.contains(name)
+                    })
+                    .collect()
+            },
+            |skill| skill_label(skill),
+        )}
         {move || {
             (expertise_slot_count.get() > 0)
                 .then(|| view! { <h2 class="card-title mt-4">"Expertise"</h2> })
@@ -77,6 +99,7 @@ pub fn skills_step(
                 slot,
                 skill_inputs,
                 skill_choices,
+                custom_skill_choices,
                 expertise_choices,
             )
         />
@@ -88,6 +111,7 @@ fn skill_slot(
     pool: SkillChoicePool,
     skill_inputs: Memo<SkillSlots>,
     skill_choices: RwSignal<Vec<Option<String>>>,
+    custom_skill_choices: RwSignal<Vec<String>>,
 ) -> impl IntoView {
     let choice = move || skill_choices.get().get(slot).cloned().flatten();
     let set_choice = move |value: Option<String>| {
@@ -97,11 +121,13 @@ fn skill_slot(
             }
         });
     };
-    // Disabled once picked in a sibling slot, or once already granted
-    // outright by class/background — picking it here would just waste the
-    // slot on a proficiency the character already has.
+    // Disabled once picked in a sibling slot, already granted outright by
+    // class/background, or already added as a custom proficiency — picking
+    // it here would just waste the slot on a proficiency the character
+    // already has.
     let is_disabled = move |opt: &str| {
         skill_inputs.get().fixed.iter().any(|fixed| fixed == opt)
+            || custom_skill_choices.get().iter().any(|custom| custom == opt)
             || skill_choices
                 .get()
                 .iter()
@@ -151,6 +177,7 @@ fn expertise_slot(
     slot: usize,
     skill_inputs: Memo<SkillSlots>,
     skill_choices: RwSignal<Vec<Option<String>>>,
+    custom_skill_choices: RwSignal<Vec<String>>,
     expertise_choices: RwSignal<Vec<Option<String>>>,
 ) -> impl IntoView {
     let choice = move || expertise_choices.get().get(slot).cloned().flatten();
@@ -164,6 +191,7 @@ fn expertise_slot(
     let proficient_pool = move || {
         let mut pool = skill_inputs.get().fixed;
         pool.extend(skill_choices.get().into_iter().flatten());
+        pool.extend(custom_skill_choices.get());
         pool.sort();
         pool.dedup();
         pool
