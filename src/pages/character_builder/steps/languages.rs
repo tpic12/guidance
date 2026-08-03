@@ -1,5 +1,5 @@
 use crate::models::character::{LanguageChoicePool, LanguageSlots};
-use crate::models::proficiency::title_case;
+use crate::models::proficiency::{contains_ignore_case, title_case};
 use leptos::prelude::*;
 
 pub fn languages_step(
@@ -81,7 +81,7 @@ fn language_slot(
     // outright by background/species — picking it here would just waste the
     // slot on a language the character already knows.
     let is_disabled = move |opt: &str| {
-        language_inputs.get().fixed.iter().any(|fixed| fixed == opt)
+        contains_ignore_case(&language_inputs.get().fixed, opt)
             || language_choices
                 .get()
                 .iter()

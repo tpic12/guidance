@@ -12,7 +12,7 @@ use crate::models::class::{ability_label, Class, ClassDetail, Subclass};
 use crate::models::feat::FeatQuery;
 use crate::models::language::LanguageGrant;
 use crate::models::optional_feature::{is_eligible, EligibilityContext, FeatureType, OptionalFeature, OptionalFeatureQuery};
-use crate::models::proficiency::{title_case, ToolCategory, ToolGrant};
+use crate::models::proficiency::{contains_ignore_case, title_case, ToolCategory, ToolGrant};
 use crate::models::skill::{skill_label, SkillGrant};
 use crate::models::species::{is_free_ability_choice, AbilityBonusGrant, SpeciesQuery};
 use crate::models::spell::Spell;
@@ -1189,7 +1189,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         language_choices.update(|choices| {
             choices.resize(pools.len(), None);
             for (choice, pool) in choices.iter_mut().zip(pools.iter()) {
-                if choice.as_ref().is_some_and(|language| !pool.options.contains(language) || slots.fixed.contains(language)) {
+                if choice.as_ref().is_some_and(|language| !pool.options.contains(language) || contains_ignore_case(&slots.fixed, language)) {
                     *choice = None;
                 }
             }
@@ -1207,7 +1207,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         tool_choices.update(|choices| {
             choices.resize(pools.len(), None);
             for (choice, pool) in choices.iter_mut().zip(pools.iter()) {
-                if choice.as_ref().is_some_and(|tool| !pool.options.contains(tool) || slots.fixed.contains(tool)) {
+                if choice.as_ref().is_some_and(|tool| !pool.options.contains(tool) || contains_ignore_case(&slots.fixed, tool)) {
                     *choice = None;
                 }
             }

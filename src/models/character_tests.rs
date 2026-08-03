@@ -875,6 +875,40 @@ fn tool_slots_choose_grant_expands_mixed_named_and_category_options() {
 }
 
 #[test]
+fn tool_slots_choose_availability_ignores_casing_against_a_fixed_grant() {
+    // Real shape: a background fixed-grants "alchemist's supplies" (raw
+    // import key, lowercase) while a class separately offers a category
+    // choice whose DB-cased options include "Alchemist's supplies" — same
+    // tool, different casing. A naive case-sensitive comparison would count
+    // both category members as "not yet covered", satisfy count=2, and keep
+    // the narrow 2-item list; recognizing the overlap leaves only 1 member
+    // actually available, which isn't enough, so it must fall back to every
+    // category's members instead (including "Dice Set", from a category the
+    // Choose grant doesn't even list).
+    let mut category_members = HashMap::new();
+    category_members.insert(
+        ToolCategory::ArtisansTool,
+        vec!["Alchemist's supplies".to_string(), "Brewer's supplies".to_string()],
+    );
+    category_members.insert(ToolCategory::GamingSet, vec!["Dice Set".to_string()]);
+    let class_tools = vec![(
+        "Fake Class".to_string(),
+        ToolGrant::Choose { count: 2, from: vec![ToolOption::Category(ToolCategory::ArtisansTool)] },
+    )];
+    let background_tools =
+        vec![("Fake Background".to_string(), ToolGrant::Fixed { tools: vec!["alchemist's supplies".to_string()] })];
+    let slots = tool_slots(&class_tools, &background_tools, &category_members);
+    assert_eq!(slots.choice_pools.len(), 2);
+    for pool in &slots.choice_pools {
+        assert_eq!(
+            pool.options,
+            vec!["Alchemist's supplies".to_string(), "Brewer's supplies".to_string(), "Dice Set".to_string()],
+            "expected a fallback to every category's members, not just the Choose grant's own ArtisansTool list"
+        );
+    }
+}
+
+#[test]
 fn expertise_slots_counts_two_per_expertise_feature_unlocked() {
     let features = vec![
         feature("Sneak Attack", 1),

@@ -1,5 +1,6 @@
 use crate::models::language::LanguageGrant;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// The 5etools item-type codes that group tool items into a choosable
 /// category (`anyArtisansTool`/`anyGamingSet`/`anyMusicalInstrument` in
@@ -82,8 +83,37 @@ pub fn describe_tool_grants(grants: &[ToolGrant]) -> String {
 fn tool_option_label(option: &ToolOption) -> String {
     match option {
         ToolOption::Named(name) => title_case(name),
-        ToolOption::Category(category) => category.label().to_string(),
+        ToolOption::Category(category) => title_case(category.label()),
     }
+}
+
+/// True if `needle` names the same proficiency as some entry in `haystack`,
+/// ignoring case. Fixed grants store 5etools' raw lowercase import keys
+/// ("common", "alchemist's supplies"); DB-backed pool options (`Language`/
+/// `Item` names, e.g. "Common", "Alchemist's supplies") don't reliably
+/// title-case back to those keys (many item names only capitalize their
+/// first word), so membership checks between the two must compare
+/// case-insensitively rather than assume a shared casing convention.
+pub fn contains_ignore_case(haystack: &[String], needle: &str) -> bool {
+    haystack.iter().any(|item| item.eq_ignore_ascii_case(needle))
+}
+
+/// Merges a fixed-grant list with the player's chosen picks into one
+/// deduped, display-ready list — case-insensitively, for the same reason as
+/// `contains_ignore_case`. When a name appears on both sides (e.g. fixed-
+/// granted "common" and separately chosen "Common" via an `Any` slot),
+/// keeps the choice's DB-sourced casing over the fixed grant's raw one.
+pub fn merge_resolved_names(fixed: &[String], choices: &[String]) -> Vec<String> {
+    let mut by_key: HashMap<String, String> = HashMap::new();
+    for name in fixed {
+        by_key.insert(name.to_lowercase(), title_case(name));
+    }
+    for name in choices {
+        by_key.insert(name.to_lowercase(), name.clone());
+    }
+    let mut names: Vec<String> = by_key.into_values().collect();
+    names.sort();
+    names
 }
 
 /// Renders language grants back into "Choose 2 from ..." / "Any 2" text.

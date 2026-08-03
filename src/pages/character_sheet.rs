@@ -7,7 +7,7 @@ use crate::models::character::{
 };
 use crate::models::class::{ability_label, Class, ClassDetail, ClassFeature, SubclassDetail};
 use crate::models::language::LanguageGrant;
-use crate::models::proficiency::{title_case, ToolGrant};
+use crate::models::proficiency::{merge_resolved_names, ToolGrant};
 use crate::models::skill::{skill_label, SkillGrant, SKILLS};
 use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
@@ -578,11 +578,10 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                             let mut seen = HashSet::new();
                             list.retain(|item| seen.insert(item.clone()));
                         }
-                        let mut tools: HashSet<String> =
-                            tool_slots(&tool_grants, &[], &HashMap::new()).fixed.into_iter().collect();
-                        tools.extend(character.tool_choices.iter().cloned());
-                        let mut tools: Vec<String> = tools.into_iter().map(|t| title_case(&t)).collect();
-                        tools.sort();
+                        let tools = merge_resolved_names(
+                            &tool_slots(&tool_grants, &[], &HashMap::new()).fixed,
+                            &character.tool_choices,
+                        );
                         let line = |label: &str, value: String| {
                             (!value.is_empty())
                                 .then(|| {
@@ -614,11 +613,10 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                         language_grants
                             .extend(species.languages.iter().cloned().map(|g| (species.name.clone(), g)));
                     }
-                    let mut languages: HashSet<String> =
-                        language_slots(&language_grants, &[], &[]).fixed.into_iter().collect();
-                    languages.extend(character.language_choices.iter().cloned());
-                    let mut languages: Vec<String> = languages.into_iter().map(|l| title_case(&l)).collect();
-                    languages.sort();
+                    let languages = merge_resolved_names(
+                        &language_slots(&language_grants, &[], &[]).fixed,
+                        &character.language_choices,
+                    );
                     (!languages.is_empty())
                         .then(|| {
                             view! {

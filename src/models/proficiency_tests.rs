@@ -38,8 +38,35 @@ fn tool_choose_grant_mixes_named_and_category_options() {
                 ToolOption::Named("gaming set".to_string()),
             ]
         }]),
-        "Choose 2 from musical instrument, Gaming Set"
+        "Choose 2 from Musical Instrument, Gaming Set"
     );
+}
+
+#[test]
+fn contains_ignore_case_matches_regardless_of_casing() {
+    let fixed = vec!["common".to_string(), "alchemist's supplies".to_string()];
+    assert!(contains_ignore_case(&fixed, "Common"));
+    assert!(contains_ignore_case(&fixed, "Alchemist's Supplies"));
+    assert!(contains_ignore_case(&fixed, "alchemist's supplies"));
+    assert!(!contains_ignore_case(&fixed, "Draconic"));
+}
+
+#[test]
+fn merge_resolved_names_dedupes_a_fixed_grant_against_a_differently_cased_choice() {
+    // Real shape: a species fixed-grants "common" (raw import key) and the
+    // player separately picks "Common" (DB-sourced) via an Any/Choose slot
+    // — these must collapse into one entry, not render as a visible duplicate.
+    let fixed = vec!["common".to_string(), "auran".to_string()];
+    let choices = vec!["Common".to_string(), "Draconic".to_string()];
+    assert_eq!(
+        merge_resolved_names(&fixed, &choices),
+        vec!["Auran".to_string(), "Common".to_string(), "Draconic".to_string()]
+    );
+}
+
+#[test]
+fn merge_resolved_names_title_cases_a_fixed_only_entry() {
+    assert_eq!(merge_resolved_names(&["thieves' tools".to_string()], &[]), vec!["Thieves' Tools".to_string()]);
 }
 
 #[test]

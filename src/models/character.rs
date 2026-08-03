@@ -3,7 +3,7 @@ use crate::models::class::{ability_label, Class, ClassDetail, ClassFeature, Subc
 use crate::models::feat::Feat;
 use crate::models::language::LanguageGrant;
 use crate::models::optional_feature::{FeatureType, OptionalFeature};
-use crate::models::proficiency::{ToolCategory, ToolGrant, ToolOption};
+use crate::models::proficiency::{contains_ignore_case, ToolCategory, ToolGrant, ToolOption};
 use crate::models::skill::{is_valid_skill, SkillGrant, SKILLS};
 use crate::models::species::{AbilityBonusGrant, Species};
 use crate::models::spell::Spell;
@@ -1149,7 +1149,7 @@ pub fn language_slots(
         match grant {
             LanguageGrant::Fixed { .. } => {}
             LanguageGrant::Choose { count, from } => {
-                let available = from.iter().filter(|language| !fixed.contains(language)).count();
+                let available = from.iter().filter(|language| !contains_ignore_case(&fixed, language)).count();
                 let pool = if available >= *count as usize {
                     from.clone()
                 } else {
@@ -1246,7 +1246,7 @@ pub fn tool_slots(
             ToolGrant::Choose { count, from } => {
                 let expanded: Vec<String> =
                     from.iter().flat_map(|option| expand_tool_option(option, category_members)).collect();
-                let available = expanded.iter().filter(|tool| !fixed.contains(tool)).count();
+                let available = expanded.iter().filter(|tool| !contains_ignore_case(&fixed, tool)).count();
                 let pool = if available >= *count as usize { expanded } else { all_tools.clone() };
                 for _ in 0..*count {
                     choice_pools.push(ToolChoicePool { source: source.clone(), options: pool.clone() });

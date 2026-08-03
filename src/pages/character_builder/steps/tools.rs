@@ -1,5 +1,5 @@
 use crate::models::character::{ToolChoicePool, ToolSlots};
-use crate::models::proficiency::title_case;
+use crate::models::proficiency::{contains_ignore_case, title_case};
 use leptos::prelude::*;
 
 pub fn tools_step(
@@ -81,7 +81,7 @@ fn tool_slot(
     // outright by class/background — picking it here would just waste the
     // slot on a proficiency the character already has.
     let is_disabled = move |opt: &str| {
-        tool_inputs.get().fixed.iter().any(|fixed| fixed == opt)
+        contains_ignore_case(&tool_inputs.get().fixed, opt)
             || tool_choices
                 .get()
                 .iter()
