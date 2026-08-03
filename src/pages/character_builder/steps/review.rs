@@ -13,6 +13,8 @@ pub struct ReviewSummary {
     pub subtitle: String,
     pub skill_choices: Vec<String>,
     pub expertise_choices: Vec<String>,
+    pub language_choices: Vec<String>,
+    pub tool_choices: Vec<String>,
     pub asi_lines: Vec<String>,
     pub cantrips: Vec<String>,
     pub spells: Vec<String>,
@@ -247,6 +249,30 @@ pub fn review_step(
                                                         "Expertise: {}",
                                                         summary.expertise_choices.join(", "),
                                                     )}
+                                                </p>
+                                            }
+                                        })}
+                                </div>
+                            }
+                        })}
+                    {(!summary.language_choices.is_empty() || !summary.tool_choices.is_empty())
+                        .then(|| {
+                            view! {
+                                <div class="card bg-base-200 p-4 flex flex-col gap-1">
+                                    <h4 class="font-semibold text-sm">"Languages & Tools"</h4>
+                                    {(!summary.language_choices.is_empty())
+                                        .then(|| {
+                                            view! {
+                                                <p class="text-sm">
+                                                    {format!("Languages: {}", summary.language_choices.join(", "))}
+                                                </p>
+                                            }
+                                        })}
+                                    {(!summary.tool_choices.is_empty())
+                                        .then(|| {
+                                            view! {
+                                                <p class="text-sm">
+                                                    {format!("Tools: {}", summary.tool_choices.join(", "))}
                                                 </p>
                                             }
                                         })}

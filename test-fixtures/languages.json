@@ -1,0 +1,21 @@
+{
+  "language": [
+    {
+      "name": "Fake Common",
+      "source": "TBK",
+      "type": "standard",
+      "script": "Fake Common"
+    },
+    {
+      "name": "Fake Sylvan",
+      "source": "TBK",
+      "type": "exotic",
+      "script": "Fake Elvish"
+    },
+    {
+      "name": "Fake Skyfolk",
+      "source": "ZBK",
+      "typicalSpeakers": ["Fake Skyfolk"]
+    }
+  ]
+}

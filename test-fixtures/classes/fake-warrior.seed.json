@@ -8,6 +8,7 @@
       "startingProficiencies": {
         "armor": ["light", "medium"],
         "weapons": ["simple"],
+        "toolProficiencies": [{ "anyArtisansTool": 1 }],
         "skills": [{ "choose": { "from": ["athletics", "intimidation", "survival"], "count": 2 } }]
       },
       "startingEquipment": {

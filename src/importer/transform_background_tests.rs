@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::language::LanguageGrant;
 use crate::models::skill::SkillGrant;
 use serde_json::json;
 
@@ -35,10 +36,46 @@ fn choose_skill_grants_keep_their_options_and_count() {
 }
 
 #[test]
-fn wildcard_tool_grants_show_counts() {
+fn background_from_raw_wires_structured_language_and_tool_grants() {
+    // Mirrors test-fixtures/backgrounds.json's Fake Scholar/Fake Wanderer shapes.
+    let raw = RawBackground {
+        name: "Fake Scholar".to_string(),
+        source: "TBK".to_string(),
+        skill_proficiencies: vec![json!({ "history": true, "insight": true })],
+        language_proficiencies: vec![json!({ "anyStandard": 2 })],
+        tool_proficiencies: vec![],
+        entries: vec![],
+    };
+    let background = background_from_raw(raw);
+    assert_eq!(background.languages, vec![LanguageGrant::Any { count: 2 }]);
+    assert_eq!(background.tools, vec![]);
+}
+
+#[test]
+fn background_from_raw_wires_mixed_category_tool_grants() {
+    // Mirrors Far Traveler's real toolProficiencies shape.
+    let raw = RawBackground {
+        name: "Fake Wanderer".to_string(),
+        source: "ZBK".to_string(),
+        skill_proficiencies: vec![],
+        language_proficiencies: vec![],
+        tool_proficiencies: vec![json!({ "choose": { "from": ["musical instrument", "gaming set"] } })],
+        entries: vec![],
+    };
+    let background = background_from_raw(raw);
     assert_eq!(
-        proficiency_labels(&[json!({ "anyArtisansTool": 1, "anyGamingSet": 2 })]),
-        vec!["Any artisan's tools", "Any 2 gaming set"]
+        background.tools,
+        vec![crate::models::proficiency::ToolGrant::Choose {
+            count: 1,
+            from: vec![
+                crate::models::proficiency::ToolOption::Category(
+                    crate::models::proficiency::ToolCategory::MusicalInstrument
+                ),
+                crate::models::proficiency::ToolOption::Category(
+                    crate::models::proficiency::ToolCategory::GamingSet
+                ),
+            ]
+        }]
     );
 }
 

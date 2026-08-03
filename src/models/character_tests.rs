@@ -1,6 +1,8 @@
 use super::*;
 use crate::models::class::{Class, OptionalFeatureProgression, Proficiencies, Subclass, SubclassDetail};
+use crate::models::language::LanguageGrant;
 use crate::models::optional_feature::FeatureType;
+use crate::models::proficiency::{ToolCategory, ToolGrant, ToolOption};
 use crate::models::skill::SkillGrant;
 use crate::models::species::AbilityBonusGrant;
 
@@ -24,6 +26,8 @@ fn character() -> Character {
         asi_choices: vec![],
         skill_choices: vec![],
         expertise_choices: vec![],
+        language_choices: vec![],
+        tool_choices: vec![],
         cantrip_choices: vec![],
         spell_choices: vec![],
         spell_grant_choices: vec![],
@@ -49,6 +53,7 @@ fn species_with_bonuses(ability_bonuses: Vec<AbilityBonusGrant>) -> Species {
         size: None,
         speed: None,
         darkvision: None,
+        languages: vec![],
         entries: vec![],
     }
 }
@@ -773,6 +778,133 @@ fn skill_slots_keeps_narrow_list_when_only_one_of_several_options_collides() {
     assert_eq!(slots.choice_pools.len(), 2);
     for pool in &slots.choice_pools {
         assert_eq!(pool.options, vec!["arcana".to_string(), "deception".to_string(), "history".to_string()]);
+    }
+}
+
+#[test]
+fn language_slots_dedups_fixed_grants_across_species_and_background() {
+    let background_languages =
+        vec![("Fake Background".to_string(), LanguageGrant::Fixed { languages: vec!["common".to_string()] })];
+    let species_languages = vec![(
+        "Fake Species".to_string(),
+        LanguageGrant::Fixed { languages: vec!["common".to_string(), "auran".to_string()] },
+    )];
+    let slots = language_slots(&background_languages, &species_languages, &[]);
+    assert_eq!(slots.fixed, vec!["auran".to_string(), "common".to_string()]);
+    assert!(slots.choice_pools.is_empty());
+}
+
+#[test]
+fn language_slots_choose_grant_falls_back_to_all_languages_when_exhausted_by_fixed() {
+    let all_languages =
+        vec!["auran".to_string(), "aquan".to_string(), "common".to_string(), "draconic".to_string()];
+    let background_languages = vec![(
+        "Fake Background".to_string(),
+        LanguageGrant::Choose { count: 1, from: vec!["auran".to_string()] },
+    )];
+    let species_languages =
+        vec![("Fake Species".to_string(), LanguageGrant::Fixed { languages: vec!["auran".to_string()] })];
+    let slots = language_slots(&background_languages, &species_languages, &all_languages);
+    assert_eq!(slots.choice_pools.len(), 1);
+    assert_eq!(slots.choice_pools[0].options, all_languages);
+}
+
+#[test]
+fn language_slots_any_grant_offers_the_full_language_list() {
+    let all_languages = vec!["auran".to_string(), "common".to_string()];
+    let background_languages = vec![("Fake Background".to_string(), LanguageGrant::Any { count: 2 })];
+    let slots = language_slots(&background_languages, &[], &all_languages);
+    assert_eq!(slots.choice_pools.len(), 2);
+    for pool in &slots.choice_pools {
+        assert_eq!(pool.options, all_languages);
+    }
+}
+
+#[test]
+fn tool_slots_dedups_fixed_grants_across_class_and_background() {
+    let class_tools =
+        vec![("Fake Class".to_string(), ToolGrant::Fixed { tools: vec!["thieves' tools".to_string()] })];
+    let background_tools = vec![(
+        "Fake Background".to_string(),
+        ToolGrant::Fixed { tools: vec!["thieves' tools".to_string(), "disguise kit".to_string()] },
+    )];
+    let slots = tool_slots(&class_tools, &background_tools, &HashMap::new());
+    assert_eq!(slots.fixed, vec!["disguise kit".to_string(), "thieves' tools".to_string()]);
+    assert!(slots.choice_pools.is_empty());
+}
+
+#[test]
+fn tool_slots_any_category_grant_expands_against_category_members() {
+    let mut category_members = HashMap::new();
+    category_members.insert(
+        ToolCategory::ArtisansTool,
+        vec!["Alchemist's supplies".to_string(), "Brewer's supplies".to_string()],
+    );
+    let class_tools = vec![(
+        "Fake Class".to_string(),
+        ToolGrant::AnyCategory { count: 1, category: ToolCategory::ArtisansTool },
+    )];
+    let slots = tool_slots(&class_tools, &[], &category_members);
+    assert_eq!(slots.choice_pools.len(), 1);
+    assert_eq!(
+        slots.choice_pools[0].options,
+        vec!["Alchemist's supplies".to_string(), "Brewer's supplies".to_string()]
+    );
+}
+
+#[test]
+fn tool_slots_choose_grant_expands_mixed_named_and_category_options() {
+    let mut category_members = HashMap::new();
+    category_members.insert(ToolCategory::MusicalInstrument, vec!["Lute".to_string(), "Flute".to_string()]);
+    let background_tools = vec![(
+        "Fake Background".to_string(),
+        ToolGrant::Choose {
+            count: 1,
+            from: vec![
+                ToolOption::Category(ToolCategory::MusicalInstrument),
+                ToolOption::Named("gaming set".to_string()),
+            ],
+        },
+    )];
+    let slots = tool_slots(&[], &background_tools, &category_members);
+    assert_eq!(slots.choice_pools.len(), 1);
+    assert_eq!(
+        slots.choice_pools[0].options,
+        vec!["Lute".to_string(), "Flute".to_string(), "gaming set".to_string()]
+    );
+}
+
+#[test]
+fn tool_slots_choose_availability_ignores_casing_against_a_fixed_grant() {
+    // Real shape: a background fixed-grants "alchemist's supplies" (raw
+    // import key, lowercase) while a class separately offers a category
+    // choice whose DB-cased options include "Alchemist's supplies" — same
+    // tool, different casing. A naive case-sensitive comparison would count
+    // both category members as "not yet covered", satisfy count=2, and keep
+    // the narrow 2-item list; recognizing the overlap leaves only 1 member
+    // actually available, which isn't enough, so it must fall back to every
+    // category's members instead (including "Dice Set", from a category the
+    // Choose grant doesn't even list).
+    let mut category_members = HashMap::new();
+    category_members.insert(
+        ToolCategory::ArtisansTool,
+        vec!["Alchemist's supplies".to_string(), "Brewer's supplies".to_string()],
+    );
+    category_members.insert(ToolCategory::GamingSet, vec!["Dice Set".to_string()]);
+    let class_tools = vec![(
+        "Fake Class".to_string(),
+        ToolGrant::Choose { count: 2, from: vec![ToolOption::Category(ToolCategory::ArtisansTool)] },
+    )];
+    let background_tools =
+        vec![("Fake Background".to_string(), ToolGrant::Fixed { tools: vec!["alchemist's supplies".to_string()] })];
+    let slots = tool_slots(&class_tools, &background_tools, &category_members);
+    assert_eq!(slots.choice_pools.len(), 2);
+    for pool in &slots.choice_pools {
+        assert_eq!(
+            pool.options,
+            vec!["Alchemist's supplies".to_string(), "Brewer's supplies".to_string(), "Dice Set".to_string()],
+            "expected a fallback to every category's members, not just the Choose grant's own ArtisansTool list"
+        );
     }
 }
 

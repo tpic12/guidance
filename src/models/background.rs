@@ -1,4 +1,6 @@
 use crate::models::entry::Entry;
+use crate::models::language::LanguageGrant;
+use crate::models::proficiency::ToolGrant;
 use crate::models::skill::SkillGrant;
 use serde::{Deserialize, Serialize};
 
@@ -12,9 +14,9 @@ pub struct Background {
     #[serde(default)]
     pub skills: Vec<SkillGrant>,
     #[serde(default)]
-    pub languages: Vec<String>,
+    pub languages: Vec<LanguageGrant>,
     #[serde(default)]
-    pub tools: Vec<String>,
+    pub tools: Vec<ToolGrant>,
     pub entries: Vec<Entry>,
 }
 

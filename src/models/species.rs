@@ -1,4 +1,5 @@
 use crate::models::entry::Entry;
+use crate::models::language::LanguageGrant;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -21,6 +22,8 @@ pub struct Species {
     pub speed: Option<String>,
     /// Darkvision range in feet, if the species has it.
     pub darkvision: Option<u32>,
+    #[serde(default)]
+    pub languages: Vec<LanguageGrant>,
     pub entries: Vec<Entry>,
 }
 

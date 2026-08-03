@@ -1,5 +1,6 @@
 use crate::importer::entries::entries_from_values;
 use crate::importer::parse_background::RawBackground;
+use crate::importer::proficiency_grants::{language_grants_from_raw, tool_grants_from_raw};
 use crate::importer::transform::slugify;
 use crate::models::background::Background;
 use crate::models::skill::SkillGrant;
@@ -14,8 +15,8 @@ fn background_from_raw(raw: RawBackground) -> Background {
         id: slugify(&raw.name),
         canonical_id: format!("{}|{}", raw.name, raw.source),
         skills: skill_grants_from_background(&raw.skill_proficiencies),
-        languages: proficiency_labels(&raw.language_proficiencies),
-        tools: proficiency_labels(&raw.tool_proficiencies),
+        languages: language_grants_from_raw(&raw.language_proficiencies),
+        tools: tool_grants_from_raw(&raw.tool_proficiencies),
         entries: entries_from_values(&raw.entries),
         name: raw.name,
         source: raw.source,
@@ -56,53 +57,6 @@ pub(crate) fn skill_grants_from_background(grants: &[Value]) -> Vec<SkillGrant> 
         out.insert(0, SkillGrant::Fixed { skills: fixed });
     }
     out
-}
-
-/// Turns one proficiency-grant array into display labels. Each element is a
-/// map of grants: a concrete proficiency keyed by its lowercase name (value
-/// `true`), an "any"-style wildcard keyed by category (value = how many), or a
-/// `choose` object with a `from` list.
-pub(crate) fn proficiency_labels(grants: &[Value]) -> Vec<String> {
-    let mut labels = Vec::new();
-    for grant in grants {
-        let Some(grant) = grant.as_object() else {
-            continue;
-        };
-        for (key, value) in grant {
-            labels.push(match key.as_str() {
-                "choose" => {
-                    let count = value.get("count").and_then(Value::as_u64).unwrap_or(1);
-                    let options = value
-                        .get("from")
-                        .and_then(Value::as_array)
-                        .map(|from| {
-                            from.iter()
-                                .filter_map(Value::as_str)
-                                .map(title_case)
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        })
-                        .unwrap_or_default();
-                    format!("Choose {count} from {options}")
-                }
-                "any" | "anyStandard" => {
-                    format!("Any {} of your choice", value.as_u64().unwrap_or(1))
-                }
-                "anyArtisansTool" => any_category_label("artisan's tools", value),
-                "anyGamingSet" => any_category_label("gaming set", value),
-                "anyMusicalInstrument" => any_category_label("musical instrument", value),
-                name => title_case(name),
-            });
-        }
-    }
-    labels
-}
-
-fn any_category_label(category: &str, count: &Value) -> String {
-    match count.as_u64().unwrap_or(1) {
-        1 => format!("Any {category}"),
-        n => format!("Any {n} {category}"),
-    }
 }
 
 /// "sleight of hand" -> "Sleight of Hand" (connecting words stay lowercase).

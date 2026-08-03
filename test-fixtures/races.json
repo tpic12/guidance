@@ -6,6 +6,7 @@
       "size": ["M"],
       "speed": { "walk": 30, "fly": true },
       "ability": [{ "dex": 2, "wis": 1 }],
+      "languageProficiencies": [{ "common": true, "auran": true }],
       "entries": [
         {
           "type": "entries",

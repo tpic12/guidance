@@ -176,3 +176,24 @@ pub async fn list_item_properties(pool: &SqlitePool) -> anyhow::Result<Vec<ItemP
 pub async fn get_item(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<Item>> {
     get_flat_by_id(pool, "items", id).await
 }
+
+/// Items whose raw type abbreviation matches `code` (e.g. "AT" for artisan's
+/// tools) — used to resolve a `ToolCategory`'s real members at read time
+/// instead of a hardcoded list. Not backed by an indexed column since
+/// `item_type` stores the resolved display label, not the raw code.
+pub async fn list_items_by_type_code(pool: &SqlitePool, code: &str) -> anyhow::Result<Vec<Item>> {
+    let rows = sqlx::query(
+        "SELECT data_json FROM items WHERE json_extract(data_json, '$.item_type_code') = ? ORDER BY name",
+    )
+    .bind(code)
+    .fetch_all(pool)
+    .await
+    .context("failed to query items by type code")?;
+
+    rows.into_iter()
+        .map(|row| {
+            let data_json: String = row.try_get("data_json").context("missing data_json column")?;
+            serde_json::from_str::<Item>(&data_json).context("failed to deserialize item row")
+        })
+        .collect()
+}

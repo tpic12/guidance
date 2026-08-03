@@ -1,5 +1,6 @@
 use crate::models::entry::Entry;
 use crate::models::optional_feature::FeatureType;
+use crate::models::proficiency::ToolGrant;
 use crate::models::skill::SkillGrant;
 use serde::{Deserialize, Serialize};
 
@@ -65,15 +66,17 @@ pub struct OptionalFeatureProgression {
     pub known: Vec<u8>,
 }
 
-/// Starting proficiencies. Armor/weapons/tools are pre-rendered to display
-/// strings; skills keep their structured fixed/choice/any shape (see
-/// `models::skill::SkillGrant`) since character creation needs to know which
-/// skills are actually choosable, not just how to describe them.
+/// Starting proficiencies. Armor/weapons are pre-rendered to display strings;
+/// tools and skills keep their structured fixed/choice/any shape (see
+/// `models::proficiency::ToolGrant`/`models::skill::SkillGrant`) since
+/// character creation needs to know which are actually choosable, not just
+/// how to describe them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Proficiencies {
     pub armor: Vec<String>,
     pub weapons: Vec<String>,
-    pub tools: Vec<String>,
+    #[serde(default)]
+    pub tools: Vec<ToolGrant>,
     #[serde(default)]
     pub skills: Vec<SkillGrant>,
 }

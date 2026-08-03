@@ -83,6 +83,8 @@ pub struct RawStartingProficiencies {
     pub weapons: Vec<serde_json::Value>,
     #[serde(default)]
     pub tools: Vec<serde_json::Value>,
+    #[serde(default, rename = "toolProficiencies")]
+    pub tool_proficiencies: Vec<serde_json::Value>,
     #[serde(default)]
     pub skills: Vec<serde_json::Value>,
 }
