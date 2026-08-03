@@ -38,3 +38,73 @@ fn detail_panel_placeholder(message: &'static str) -> impl IntoView {
         </div>
     }
 }
+
+/// One "pick a proficiency" row — a heading, a `<select>` of `options`, and
+/// (for player-added custom rows) a "Remove" control. Shared by the Skills/
+/// Languages/Tools steps' granted-choice slots, their custom-proficiency
+/// slots, and the Skills step's expertise slots — all six/seven are the same
+/// shape, differing only in heading text, option source, label formatting,
+/// and disabled/removable behavior.
+pub fn proficiency_slot(
+    heading: String,
+    choice: impl Fn() -> Option<String> + Copy + Send + Sync + 'static,
+    set_choice: impl Fn(Option<String>) + Send + Sync + 'static,
+    options: impl Fn() -> Vec<String> + Send + Sync + 'static,
+    is_disabled: impl Fn(String) -> bool + Copy + Send + Sync + 'static,
+    label_fn: impl Fn(&str) -> String + Copy + Send + Sync + 'static,
+    on_remove: Option<Callback<()>>,
+) -> impl IntoView {
+    view! {
+        <div class="flex flex-col gap-1 p-3 border border-base-300 rounded-box">
+            {match on_remove {
+                Some(remove) => {
+                    view! {
+                        <div class="flex items-center justify-between">
+                            <span class="font-semibold text-sm">{heading.clone()}</span>
+                            <button
+                                type="button"
+                                class="btn btn-ghost btn-xs"
+                                on:click=move |_| remove.run(())
+                            >
+                                "Remove"
+                            </button>
+                        </div>
+                    }
+                        .into_any()
+                }
+                None => view! { <span class="font-semibold text-sm">{heading.clone()}</span> }.into_any(),
+            }}
+            <select
+                class="select select-bordered select-sm w-64"
+                on:change=move |ev| {
+                    let value = event_target_value(&ev);
+                    set_choice(if value.is_empty() { None } else { Some(value) });
+                }
+            >
+                <option value="" selected=move || choice().is_none()>
+                    "— choose —"
+                </option>
+                {move || {
+                    options()
+                        .into_iter()
+                        .map(|opt| {
+                            let value = opt.clone();
+                            let label = label_fn(&opt);
+                            let selected_opt = opt.clone();
+                            let disabled_opt = opt.clone();
+                            view! {
+                                <option
+                                    value=value
+                                    selected=move || choice().as_deref() == Some(selected_opt.as_str())
+                                    disabled=move || is_disabled(disabled_opt.clone())
+                                >
+                                    {label}
+                                </option>
+                            }
+                        })
+                        .collect_view()
+                }}
+            </select>
+        </div>
+    }
+}

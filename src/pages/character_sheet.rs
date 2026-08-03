@@ -172,6 +172,7 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
         let slots = skill_slots(&class_skills, &background_skills);
         let mut proficient: HashSet<String> = slots.fixed.into_iter().collect();
         proficient.extend(character.skill_choices.iter().cloned());
+        proficient.extend(character.custom_skill_proficiencies.iter().cloned());
         let expertise: HashSet<&String> = character.expertise_choices.iter().collect();
         SKILLS.map(|(name, ability)| {
             let is_proficient = proficient.contains(name);
@@ -578,9 +579,15 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                             let mut seen = HashSet::new();
                             list.retain(|item| seen.insert(item.clone()));
                         }
+                        let tool_choices: Vec<String> = character
+                            .tool_choices
+                            .iter()
+                            .chain(character.custom_tool_proficiencies.iter())
+                            .cloned()
+                            .collect();
                         let tools = merge_resolved_names(
                             &tool_slots(&tool_grants, &[], &HashMap::new()).fixed,
-                            &character.tool_choices,
+                            &tool_choices,
                         );
                         let line = |label: &str, value: String| {
                             (!value.is_empty())
@@ -613,9 +620,15 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
                         language_grants
                             .extend(species.languages.iter().cloned().map(|g| (species.name.clone(), g)));
                     }
+                    let language_choices: Vec<String> = character
+                        .language_choices
+                        .iter()
+                        .chain(character.custom_language_proficiencies.iter())
+                        .cloned()
+                        .collect();
                     let languages = merge_resolved_names(
                         &language_slots(&language_grants, &[], &[]).fixed,
-                        &character.language_choices,
+                        &language_choices,
                     );
                     (!languages.is_empty())
                         .then(|| {

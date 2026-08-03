@@ -54,6 +54,19 @@ pub struct Character {
     /// category slots. Fixed grants aren't stored here — re-derived via `tool_slots`.
     #[serde(default)]
     pub tool_choices: Vec<String>,
+    /// Skill proficiencies the player added directly, unattached to any
+    /// class/background/species grant — an escape valve for prose-only
+    /// grants the import pipeline can't parse (see ticket #66).
+    #[serde(default)]
+    pub custom_skill_proficiencies: Vec<String>,
+    /// Language proficiencies the player added directly — see
+    /// `custom_skill_proficiencies`.
+    #[serde(default)]
+    pub custom_language_proficiencies: Vec<String>,
+    /// Tool proficiencies the player added directly — see
+    /// `custom_skill_proficiencies`.
+    #[serde(default)]
+    pub custom_tool_proficiencies: Vec<String>,
     /// Cantrips known, by spell id. Always empty for non-casters.
     #[serde(default)]
     pub cantrip_choices: Vec<String>,
@@ -186,6 +199,29 @@ impl Character {
         for tool in &self.tool_choices {
             if !seen.insert(tool) {
                 return Err(format!("'{tool}' was chosen more than once"));
+            }
+        }
+        for skill in &self.custom_skill_proficiencies {
+            if !is_valid_skill(skill) {
+                return Err(format!("'{skill}' is not a valid skill"));
+            }
+        }
+        let mut seen = HashSet::new();
+        for skill in &self.custom_skill_proficiencies {
+            if !seen.insert(skill) {
+                return Err(format!("'{skill}' was added as a custom proficiency more than once"));
+            }
+        }
+        let mut seen = HashSet::new();
+        for language in &self.custom_language_proficiencies {
+            if !seen.insert(language) {
+                return Err(format!("'{language}' was added as a custom proficiency more than once"));
+            }
+        }
+        let mut seen = HashSet::new();
+        for tool in &self.custom_tool_proficiencies {
+            if !seen.insert(tool) {
+                return Err(format!("'{tool}' was added as a custom proficiency more than once"));
             }
         }
         match self.ability_bonus_source {

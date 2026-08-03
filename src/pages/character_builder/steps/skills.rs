@@ -1,6 +1,8 @@
 use crate::models::character::{SkillChoicePool, SkillSlots};
-use crate::models::skill::skill_label;
+use crate::models::skill::{skill_label, SKILLS};
 use leptos::prelude::*;
+
+use super::proficiency_slot;
 
 pub fn skills_step(
     skill_inputs: Memo<SkillSlots>,
@@ -8,6 +10,7 @@ pub fn skills_step(
     expertise_slot_count: Memo<usize>,
     expertise_choices: RwSignal<Vec<Option<String>>>,
     skill_proficiency_sources: Memo<Vec<(String, Vec<String>)>>,
+    custom_skill_choices: RwSignal<Vec<Option<String>>>,
 ) -> impl IntoView {
     view! {
         <h2 class="card-title">"Skill Proficiencies"</h2>
@@ -64,8 +67,28 @@ pub fn skills_step(
         <For
             each=move || skill_inputs.get().choice_pools.into_iter().enumerate()
             key=|(slot, _)| *slot
-            children=move |(slot, pool)| skill_slot(slot, pool, skill_inputs, skill_choices)
+            children=move |(slot, pool)| {
+                skill_slot(slot, pool, skill_inputs, skill_choices, custom_skill_choices)
+            }
         />
+        // Custom rows are keyed on slot index too — same reasoning as the
+        // granted slots above, and it also keeps a slot's own selection
+        // stable while an unrelated slot is added/removed elsewhere in the
+        // list, since removal always reindexes the tail.
+        <For
+            each=move || custom_skill_choices.get().into_iter().enumerate()
+            key=|(slot, _)| *slot
+            children=move |(slot, _)| {
+                custom_skill_slot(slot, skill_inputs, skill_choices, custom_skill_choices)
+            }
+        />
+        <button
+            type="button"
+            class="btn btn-outline btn-sm w-fit"
+            on:click=move |_| custom_skill_choices.update(|choices| choices.push(None))
+        >
+            "+ Add Custom"
+        </button>
         {move || {
             (expertise_slot_count.get() > 0)
                 .then(|| view! { <h2 class="card-title mt-4">"Expertise"</h2> })
@@ -77,6 +100,7 @@ pub fn skills_step(
                 slot,
                 skill_inputs,
                 skill_choices,
+                custom_skill_choices,
                 expertise_choices,
             )
         />
@@ -88,130 +112,122 @@ fn skill_slot(
     pool: SkillChoicePool,
     skill_inputs: Memo<SkillSlots>,
     skill_choices: RwSignal<Vec<Option<String>>>,
+    custom_skill_choices: RwSignal<Vec<Option<String>>>,
 ) -> impl IntoView {
-    let choice = move || skill_choices.get().get(slot).cloned().flatten();
-    let set_choice = move |value: Option<String>| {
-        skill_choices.update(|choices| {
-            if let Some(entry) = choices.get_mut(slot) {
-                *entry = value;
-            }
-        });
-    };
-    // Disabled once picked in a sibling slot, or once already granted
-    // outright by class/background — picking it here would just waste the
-    // slot on a proficiency the character already has.
-    let is_disabled = move |opt: &str| {
-        skill_inputs.get().fixed.iter().any(|fixed| fixed == opt)
+    let heading = format!("{}: skill choice", pool.source);
+    let options = pool.options;
+    // Disabled once picked in a sibling slot, already granted outright by
+    // class/background, or already added as a custom proficiency — picking
+    // it here would just waste the slot on a proficiency the character
+    // already has.
+    let is_disabled = move |opt: String| {
+        skill_inputs.get().fixed.iter().any(|fixed| fixed == &opt)
+            || custom_skill_choices.get().iter().any(|custom| custom.as_deref() == Some(opt.as_str()))
             || skill_choices
                 .get()
                 .iter()
                 .enumerate()
-                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt))
+                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt.as_str()))
     };
-    let heading = format!("{}: skill choice", pool.source);
 
-    view! {
-        <div class="flex flex-col gap-1 p-3 border border-base-300 rounded-box">
-            <span class="font-semibold text-sm">{heading}</span>
-            <select
-                class="select select-bordered select-sm w-64"
-                on:change=move |ev| {
-                    let value = event_target_value(&ev);
-                    set_choice(if value.is_empty() { None } else { Some(value) });
+    proficiency_slot(
+        heading,
+        move || skill_choices.get().get(slot).cloned().flatten(),
+        move |value| {
+            skill_choices.update(|choices| {
+                if let Some(entry) = choices.get_mut(slot) {
+                    *entry = value;
                 }
-            >
-                <option value="" selected=move || choice().is_none()>
-                    "— choose —"
-                </option>
-                {pool
-                    .options
-                    .into_iter()
-                    .map(|opt| {
-                        let value = opt.clone();
-                        let label = skill_label(&opt);
-                        let selected_opt = opt.clone();
-                        let disabled_opt = opt.clone();
-                        view! {
-                            <option
-                                value=value
-                                selected=move || choice().as_deref() == Some(selected_opt.as_str())
-                                disabled=move || is_disabled(&disabled_opt)
-                            >
-                                {label}
-                            </option>
-                        }
-                    })
-                    .collect_view()}
-            </select>
-        </div>
-    }
+            });
+        },
+        move || options.clone(),
+        is_disabled,
+        skill_label,
+        None,
+    )
+}
+
+// Same shape as `skill_slot` (a "Custom: skill choice" row is otherwise
+// indistinguishable from a granted one), plus a remove control since these
+// are directly player-added rather than derived from a grant.
+fn custom_skill_slot(
+    slot: usize,
+    skill_inputs: Memo<SkillSlots>,
+    skill_choices: RwSignal<Vec<Option<String>>>,
+    custom_skill_choices: RwSignal<Vec<Option<String>>>,
+) -> impl IntoView {
+    // Disabled once picked in a sibling slot (granted or custom), or already
+    // granted outright by class/background — same reasoning as `skill_slot`.
+    let is_disabled = move |opt: String| {
+        skill_inputs.get().fixed.iter().any(|fixed| fixed == &opt)
+            || skill_choices.get().iter().any(|picked| picked.as_deref() == Some(opt.as_str()))
+            || custom_skill_choices
+                .get()
+                .iter()
+                .enumerate()
+                .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt.as_str()))
+    };
+    let on_remove = Callback::new(move |()| {
+        custom_skill_choices.update(|choices| {
+            if slot < choices.len() {
+                choices.remove(slot);
+            }
+        });
+    });
+
+    proficiency_slot(
+        "Custom: skill choice".to_string(),
+        move || custom_skill_choices.get().get(slot).cloned().flatten(),
+        move |value| {
+            custom_skill_choices.update(|choices| {
+                if let Some(entry) = choices.get_mut(slot) {
+                    *entry = value;
+                }
+            });
+        },
+        || SKILLS.iter().map(|(name, _)| name.to_string()).collect(),
+        is_disabled,
+        skill_label,
+        Some(on_remove),
+    )
 }
 
 fn expertise_slot(
     slot: usize,
     skill_inputs: Memo<SkillSlots>,
     skill_choices: RwSignal<Vec<Option<String>>>,
+    custom_skill_choices: RwSignal<Vec<Option<String>>>,
     expertise_choices: RwSignal<Vec<Option<String>>>,
 ) -> impl IntoView {
-    let choice = move || expertise_choices.get().get(slot).cloned().flatten();
-    let set_choice = move |value: Option<String>| {
-        expertise_choices.update(|choices| {
-            if let Some(entry) = choices.get_mut(slot) {
-                *entry = value;
-            }
-        });
-    };
     let proficient_pool = move || {
         let mut pool = skill_inputs.get().fixed;
         pool.extend(skill_choices.get().into_iter().flatten());
+        pool.extend(custom_skill_choices.get().into_iter().flatten());
         pool.sort();
         pool.dedup();
         pool
     };
-    let is_disabled = move |opt: &str| {
+    let is_disabled = move |opt: String| {
         expertise_choices
             .get()
             .iter()
             .enumerate()
-            .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt))
+            .any(|(i, picked)| i != slot && picked.as_deref() == Some(opt.as_str()))
     };
 
-    view! {
-        <div class="flex flex-col gap-1 p-3 border border-base-300 rounded-box">
-            <span class="font-semibold text-sm">{format!("Expertise choice {}", slot + 1)}</span>
-            <select
-                class="select select-bordered select-sm w-64"
-                on:change=move |ev| {
-                    let value = event_target_value(&ev);
-                    set_choice(if value.is_empty() { None } else { Some(value) });
+    proficiency_slot(
+        format!("Expertise choice {}", slot + 1),
+        move || expertise_choices.get().get(slot).cloned().flatten(),
+        move |value| {
+            expertise_choices.update(|choices| {
+                if let Some(entry) = choices.get_mut(slot) {
+                    *entry = value;
                 }
-            >
-                <option value="" selected=move || choice().is_none()>
-                    "— choose —"
-                </option>
-                {move || {
-                    proficient_pool()
-                        .into_iter()
-                        .map(|opt| {
-                            let value = opt.clone();
-                            let label = skill_label(&opt);
-                            let selected_opt = opt.clone();
-                            let disabled_opt = opt.clone();
-                            view! {
-                                <option
-                                    value=value
-                                    selected=move || {
-                                        choice().as_deref() == Some(selected_opt.as_str())
-                                    }
-                                    disabled=move || is_disabled(&disabled_opt)
-                                >
-                                    {label}
-                                </option>
-                            }
-                        })
-                        .collect_view()
-                }}
-            </select>
-        </div>
-    }
+            });
+        },
+        proficient_pool,
+        is_disabled,
+        skill_label,
+        None,
+    )
 }

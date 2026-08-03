@@ -28,6 +28,9 @@ fn character() -> Character {
         expertise_choices: vec![],
         language_choices: vec![],
         tool_choices: vec![],
+        custom_skill_proficiencies: vec![],
+        custom_language_proficiencies: vec![],
+        custom_tool_proficiencies: vec![],
         cantrip_choices: vec![],
         spell_choices: vec![],
         spell_grant_choices: vec![],
@@ -696,6 +699,32 @@ fn validate_rejects_invalid_or_duplicate_skill_choices() {
     let mut valid = character();
     valid.skill_choices = vec!["athletics".to_string(), "intimidation".to_string()];
     valid.expertise_choices = vec!["athletics".to_string()];
+    assert!(valid.validate().is_ok());
+}
+
+#[test]
+fn validate_rejects_invalid_or_duplicate_custom_proficiencies() {
+    let mut unknown_skill = character();
+    unknown_skill.custom_skill_proficiencies = vec!["lockpicking".to_string()];
+    assert!(unknown_skill.validate().is_err());
+
+    let mut duplicate_skill = character();
+    duplicate_skill.custom_skill_proficiencies = vec!["athletics".to_string(), "athletics".to_string()];
+    assert!(duplicate_skill.validate().is_err());
+
+    let mut duplicate_language = character();
+    duplicate_language.custom_language_proficiencies = vec!["draconic".to_string(), "draconic".to_string()];
+    assert!(duplicate_language.validate().is_err());
+
+    let mut duplicate_tool = character();
+    duplicate_tool.custom_tool_proficiencies =
+        vec!["thieves' tools".to_string(), "thieves' tools".to_string()];
+    assert!(duplicate_tool.validate().is_err());
+
+    let mut valid = character();
+    valid.custom_skill_proficiencies = vec!["nature".to_string()];
+    valid.custom_language_proficiencies = vec!["draconic".to_string()];
+    valid.custom_tool_proficiencies = vec!["thieves' tools".to_string()];
     assert!(valid.validate().is_ok());
 }
 
