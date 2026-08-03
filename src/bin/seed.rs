@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
 
     if std::env::var("SEED_RESET").is_ok() {
         // guard: refuse to run against anything that isn't your local dev db file
-        for table in ["subclass_granted_spells", "subclass_spell_choice_grants", "subclass_spells", "class_spells", "subclass_features", "class_features", "subclasses", "classes", "spells", "backgrounds", "feats", "species", "optional_feature_prerequisite_pacts", "optional_feature_prerequisite_classes", "optional_feature_types", "optional_features", "item_properties", "items"] {
+        for table in ["subclass_granted_spells", "subclass_spell_choice_grants", "subclass_spells", "class_spells", "subclass_features", "class_features", "subclasses", "classes", "spells", "backgrounds", "feats", "languages", "species", "optional_feature_prerequisite_pacts", "optional_feature_prerequisite_classes", "optional_feature_types", "optional_features", "item_properties", "items"] {
             sqlx::query(&format!("DELETE FROM {table}")).execute(&pool).await?;
         }
     }
@@ -40,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
     seed_class_spells(&pool, &fixtures_dir).await?;
     seed_backgrounds(&pool, &fixtures_dir).await?;
     seed_feats(&pool, &fixtures_dir).await?;
+    seed_languages(&pool, &fixtures_dir).await?;
     seed_optional_features(&pool, &fixtures_dir).await?;
     seed_items(&pool, &fixtures_dir).await?;
     seed_species(&pool, &fixtures_dir).await?;
@@ -148,6 +149,23 @@ async fn seed_feats(pool: &SqlitePool, fixtures_dir: &str) -> anyhow::Result<()>
             .execute(pool).await?;
     }
     println!("Seeded {count} feats");
+    Ok(())
+}
+
+async fn seed_languages(pool: &SqlitePool, fixtures_dir: &str) -> anyhow::Result<()> {
+    let raw = std::fs::read_to_string(format!("{fixtures_dir}/languages.json"))?;
+    let languages = importer::transform_language::languages_from_parsed(
+        importer::parse_language::parse_language_file(&raw)?,
+    )?;
+
+    let count = languages.len();
+    for language in languages {
+        sqlx::query("INSERT INTO languages (id, name, source, data_json) VALUES (?,?,?,?)")
+            .bind(&language.id).bind(&language.name).bind(&language.source)
+            .bind(serde_json::to_string(&language)?)
+            .execute(pool).await?;
+    }
+    println!("Seeded {count} languages");
     Ok(())
 }
 
