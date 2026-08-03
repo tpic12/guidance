@@ -619,7 +619,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
     let expertise_choices = RwSignal::new(Vec::<Option<String>>::new());
     let language_choices = RwSignal::new(Vec::<Option<String>>::new());
     let tool_choices = RwSignal::new(Vec::<Option<String>>::new());
-    let custom_skill_choices = RwSignal::new(Vec::<String>::new());
+    let custom_skill_choices = RwSignal::new(Vec::<Option<String>>::new());
     let custom_language_choices = RwSignal::new(Vec::<String>::new());
     let custom_tool_choices = RwSignal::new(Vec::<String>::new());
     let cantrip_choices = RwSignal::new(Vec::<String>::new());
@@ -758,7 +758,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             expertise_choices.set(existing.expertise_choices.into_iter().map(Some).collect());
             language_choices.set(existing.language_choices.into_iter().map(Some).collect());
             tool_choices.set(existing.tool_choices.into_iter().map(Some).collect());
-            custom_skill_choices.set(existing.custom_skill_proficiencies);
+            custom_skill_choices.set(existing.custom_skill_proficiencies.into_iter().map(Some).collect());
             custom_language_choices.set(existing.custom_language_proficiencies);
             custom_tool_choices.set(existing.custom_tool_proficiencies);
             cantrip_choices.set(existing.cantrip_choices);
@@ -809,7 +809,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
             expertise_choices: expertise_choices.get().into_iter().flatten().collect(),
             language_choices: language_choices.get().into_iter().flatten().collect(),
             tool_choices: tool_choices.get().into_iter().flatten().collect(),
-            custom_skill_proficiencies: custom_skill_choices.get(),
+            custom_skill_proficiencies: custom_skill_choices.get().into_iter().flatten().collect(),
             custom_language_proficiencies: custom_language_choices.get(),
             custom_tool_proficiencies: custom_tool_choices.get(),
             cantrip_choices: cantrip_choices.get(),
@@ -1620,7 +1620,11 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         let mut skill_names =
             skill_choices.get().into_iter().flatten().map(|skill| skill_label(&skill)).collect::<Vec<_>>();
         skill_names.extend(
-            custom_skill_choices.get().iter().map(|skill| format!("{} (Custom)", skill_label(skill))),
+            custom_skill_choices
+                .get()
+                .into_iter()
+                .flatten()
+                .map(|skill| format!("{} (Custom)", skill_label(&skill))),
         );
         let expertise_names =
             expertise_choices.get().into_iter().flatten().map(|skill| skill_label(&skill)).collect::<Vec<_>>();
