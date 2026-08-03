@@ -226,6 +226,13 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
             "Tool choices don't match what's unlocked for these classes and background",
         ));
     }
+    let custom_tool_proficiencies_valid = character
+        .custom_tool_proficiencies
+        .iter()
+        .all(|tool| category_members.values().any(|items| contains_ignore_case(items, tool)));
+    if !custom_tool_proficiencies_valid {
+        return Err(ServerFnError::new("Custom tool proficiency isn't a recognized tool"));
+    }
 
     let background_languages: Vec<(String, LanguageGrant)> =
         background.languages.iter().cloned().map(|grant| (background.name.clone(), grant)).collect();
@@ -247,6 +254,13 @@ pub async fn save_character(character: Character) -> Result<String, ServerFnErro
         return Err(ServerFnError::new(
             "Language choices don't match what's unlocked for this background and species",
         ));
+    }
+    let custom_language_proficiencies_valid = character
+        .custom_language_proficiencies
+        .iter()
+        .all(|language| contains_ignore_case(&all_languages, language));
+    if !custom_language_proficiencies_valid {
+        return Err(ServerFnError::new("Custom language proficiency isn't a recognized language"));
     }
 
     // Same reasoning again: re-derive the species' ability-bonus grant so a
@@ -1202,6 +1216,7 @@ pub fn CharacterBuilderPage() -> impl IntoView {
         let count = expertise_slot_count.get();
         let mut proficient = skill_inputs.get().fixed;
         proficient.extend(skill_choices.get().into_iter().flatten());
+        proficient.extend(custom_skill_choices.get().into_iter().flatten());
         expertise_choices.update(|choices| {
             choices.resize(count, None);
             for choice in choices.iter_mut() {
