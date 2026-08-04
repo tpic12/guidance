@@ -9,6 +9,10 @@
 
 @source "../src/**/*.rs";
 
+/* Drives sidebar's icon-only vs expanded rail, keyed off #my-drawer-4 */
+@custom-variant is-drawer-open (body:has(#my-drawer-4:checked) &);
+@custom-variant is-drawer-close (body:not(:has(#my-drawer-4:checked)) &);
+
 /*
  * "Guidance" theme — a GM's binder, not a dashboard: ink-dark pages, a brass
  * tab pull for the one thing you're looking at, ledger-mono for numbers.

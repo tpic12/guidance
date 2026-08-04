@@ -79,16 +79,18 @@ pub fn NavBar() -> impl IntoView {
 
     let drawer_toggle = NodeRef::<leptos::html::Input>::new();
 
-    // Default the sidebar to expanded (labels visible) on desktop-width
-    // screens; mobile stays collapsed/off-canvas until the user opens it.
-    // Matches the `lg` breakpoint used by `lg:drawer-open` below.
-    Effect::new(move |_| {
+    // Below `lg` the checkbox means overlay open/closed; close it on
+    // navigation so routing doesn't leave the overlay stuck open. Above
+    // `lg` it means collapsed/expanded rail, so leave it untouched there.
+    let close_drawer_below_lg = move || {
         if let Some(input) = drawer_toggle.get() {
-            if let Ok(Some(query)) = window().match_media("(min-width: 1024px)") {
-                input.set_checked(query.matches());
+            if let Ok(Some(query)) = window().match_media("(max-width: 1023.98px)") {
+                if query.matches() {
+                    input.set_checked(false);
+                }
             }
         }
-    });
+    };
 
     view! {
         <div class="drawer lg:drawer-open">
@@ -96,6 +98,17 @@ pub fn NavBar() -> impl IntoView {
           <div class="drawer-content">
             // <!-- Navbar -->
             <nav class="navbar w-full bg-base-300 border-b border-base-content/10">
+              <label
+                for="my-drawer-4"
+                aria-label="open sidebar"
+                class="btn btn-square btn-ghost drawer-button lg:hidden"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linejoin="round" stroke-linecap="round" stroke-width="2" fill="none" stroke="currentColor" class="size-5">
+                  <path d="M4 6l16 0"></path>
+                  <path d="M4 12l16 0"></path>
+                  <path d="M4 18l16 0"></path>
+                </svg>
+              </label>
               <a href="/".to_string() class="px-4 flex items-baseline gap-1.5 font-display text-lg font-semibold tracking-tight">
                 "Guidance"
                 <span class="text-primary text-lg leading-none">"·"</span>
@@ -120,10 +133,10 @@ pub fn NavBar() -> impl IntoView {
             <label for="my-drawer-4" aria-label="close sidebar" class="drawer-overlay"></label>
             <div class="flex min-h-full flex-col items-start bg-base-200 is-drawer-close:w-14 is-drawer-open:w-64">
               <ul class="menu w-full grow">
-                <li>
-                  <label 
-                    for="my-drawer-4" 
-                    class="is-drawer-close:tooltip is-drawer-close:tooltip-right flex items-center gap-2 w-full cursor-pointer" 
+                <li class="max-lg:hidden">
+                  <label
+                    for="my-drawer-4"
+                    class="is-drawer-close:tooltip is-drawer-close:tooltip-right flex items-center gap-2 w-full cursor-pointer"
                     data-tip="Toggle Menu"
                     aria-label="toggle sidebar"
                   >
@@ -174,6 +187,7 @@ pub fn NavBar() -> impl IntoView {
                                 class="nav-tab is-drawer-close:tooltip is-drawer-close:tooltip-right flex items-center gap-3 w-full text-left py-2"
                                 class:nav-tab-active=is_active
                                 data-tip=option.key
+                                on:click=move |_| close_drawer_below_lg()
                               >
                               <span
                                   class="my-1.5 inline-flex items-center justify-center size-4 text-current"
@@ -193,7 +207,10 @@ pub fn NavBar() -> impl IntoView {
                     type="button"
                     class="is-drawer-close:tooltip is-drawer-close:tooltip-right flex items-center gap-3 w-full text-left"
                     data-tip="Log out"
-                    on:click=move |_| { logout_action.dispatch(()); }
+                    on:click=move |_| {
+                        close_drawer_below_lg();
+                        logout_action.dispatch(());
+                    }
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linejoin="round" stroke-linecap="round" stroke-width="2" fill="none" stroke="currentColor" class="my-1.5 inline-block size-4">
                       <path d="M14 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2"></path>
