@@ -45,10 +45,9 @@ pub fn subclass_spell_links_from_parsed(lookup: &RawSpellClassLookup) -> Vec<Sub
     let mut links = Vec::new();
     for (spell_source, spells) in lookup {
         for (spell_name_lower, entry) in spells {
-            // subclassSource -> className -> classSource -> subclassShortName -> value.
-            for (subclass_source, by_class) in &entry.subclass {
+            for by_class in entry.subclass.values() {
                 for (class_name, by_class_source) in by_class {
-                    for by_short_name in by_class_source.values() {
+                    for (subclass_source, by_short_name) in by_class_source {
                         for subclass_short_name in by_short_name.keys() {
                             links.push(SubclassSpellLink {
                                 spell_name_lower: spell_name_lower.clone(),

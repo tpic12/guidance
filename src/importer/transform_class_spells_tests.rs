@@ -74,6 +74,29 @@ fn flattens_subclass_grants_into_links() {
 }
 
 #[test]
+fn resolves_subclass_source_independently_of_class_source() {
+    // Real-world shape: class source (PHB, Warlock's book) differs from
+    // subclass source (TCE, Fathomless's book) — see gendata-spell-source-lookup.json.
+    let raw = r#"{
+        "phb": {
+            "thunderwave": {
+                "subclass": {
+                    "PHB": {
+                        "Warlock": {"TCE": {"Fathomless": {"name": "The Fathomless"}}}
+                    }
+                }
+            }
+        }
+    }"#;
+    let lookup = parse_class_spell_lookup(raw).unwrap();
+    let links = subclass_spell_links_from_parsed(&lookup);
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].class_name, "Warlock");
+    assert_eq!(links[0].subclass_short_name, "Fathomless");
+    assert_eq!(links[0].subclass_source, "TCE");
+}
+
+#[test]
 fn empty_subclass_map_yields_no_links() {
     let raw = r#"{"phb": {"prestidigitation": {}}}"#;
     let lookup = parse_class_spell_lookup(raw).unwrap();

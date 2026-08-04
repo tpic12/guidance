@@ -13,7 +13,7 @@ pub struct RawSpellClassEntry {
     /// itself is unused, only which class names are present matters).
     #[serde(default)]
     pub class: HashMap<String, HashMap<String, serde_json::Value>>,
-    /// subclassSource -> className -> classSource -> subclassShortName ->
+    /// classSource -> className -> subclassSource -> subclassShortName ->
     /// details (again unused; only presence/keys matter).
     #[serde(default)]
     pub subclass: HashMap<String, HashMap<String, HashMap<String, HashMap<String, serde_json::Value>>>>,
