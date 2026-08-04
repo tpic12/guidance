@@ -77,9 +77,9 @@ pub fn background_step(
                                                 type="button"
                                                 class=move || {
                                                     if is_selected() {
-                                                        "flex flex-col items-start gap-0 menu-active"
+                                                        "flex flex-col items-start gap-0 bg-primary/15 border border-primary/50"
                                                     } else {
-                                                        "flex flex-col items-start gap-0"
+                                                        "flex flex-col items-start gap-0 border border-transparent"
                                                     }
                                                 }
                                                 on:mouseenter=move |_| {
