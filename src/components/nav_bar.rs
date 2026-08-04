@@ -77,9 +77,24 @@ pub fn NavBar() -> impl IntoView {
         },
     ];
 
+    let drawer_toggle = NodeRef::<leptos::html::Input>::new();
+
+    // Below `lg` the checkbox means overlay open/closed; close it on
+    // navigation so routing doesn't leave the overlay stuck open. Above
+    // `lg` it means collapsed/expanded rail, so leave it untouched there.
+    let close_drawer_below_lg = move || {
+        if let Some(input) = drawer_toggle.get() {
+            if let Ok(Some(query)) = window().match_media("(max-width: 1023.98px)") {
+                if query.matches() {
+                    input.set_checked(false);
+                }
+            }
+        }
+    };
+
     view! {
         <div class="drawer lg:drawer-open">
-          <input id="my-drawer-4" type="checkbox" class="drawer-toggle" />
+          <input id="my-drawer-4" type="checkbox" class="drawer-toggle" node_ref=drawer_toggle />
           <div class="drawer-content">
             // <!-- Navbar -->
             <nav class="navbar w-full bg-base-300 border-b border-base-content/10">
@@ -172,6 +187,7 @@ pub fn NavBar() -> impl IntoView {
                                 class="nav-tab is-drawer-close:tooltip is-drawer-close:tooltip-right flex items-center gap-3 w-full text-left py-2"
                                 class:nav-tab-active=is_active
                                 data-tip=option.key
+                                on:click=move |_| close_drawer_below_lg()
                               >
                               <span
                                   class="my-1.5 inline-flex items-center justify-center size-4 text-current"
@@ -191,7 +207,10 @@ pub fn NavBar() -> impl IntoView {
                     type="button"
                     class="is-drawer-close:tooltip is-drawer-close:tooltip-right flex items-center gap-3 w-full text-left"
                     data-tip="Log out"
-                    on:click=move |_| { logout_action.dispatch(()); }
+                    on:click=move |_| {
+                        close_drawer_below_lg();
+                        logout_action.dispatch(());
+                    }
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linejoin="round" stroke-linecap="round" stroke-width="2" fill="none" stroke="currentColor" class="my-1.5 inline-block size-4">
                       <path d="M14 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2"></path>
