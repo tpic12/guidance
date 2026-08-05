@@ -1,3 +1,9 @@
+mod actions_tab;
+mod badges;
+mod features_tab;
+mod placeholder_tab;
+mod spells_tab;
+
 use crate::components::entry_view::entry_view;
 use crate::models::character::{
     ability_modifier, active_subclass, asi_levels, effective_spellcasting, final_abilities, language_slots,
@@ -9,9 +15,41 @@ use crate::models::class::{ability_label, Class, ClassDetail, ClassFeature, Subc
 use crate::models::language::LanguageGrant;
 use crate::models::proficiency::{merge_resolved_names, ToolGrant};
 use crate::models::skill::{skill_label, SkillGrant, SKILLS};
+use crate::models::spell::Spell;
+use actions_tab::ActionsTab;
+use features_tab::FeaturesTab;
 use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
+use placeholder_tab::PlaceholderTab;
+use spells_tab::SpellsTab;
 use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SheetTab {
+    Actions,
+    Spells,
+    Features,
+    Inventory,
+    Notes,
+}
+
+/// One tab-bar entry: renders active/inactive and flips `active` on click.
+/// Shared by the top-level sheet tabs and every tab's own sub-tab bar.
+fn tab_link<T>(label: &'static str, tab: T, active: RwSignal<T>) -> impl IntoView
+where
+    T: Copy + PartialEq + Send + Sync + 'static,
+{
+    view! {
+        <a
+            role="tab"
+            class="tab"
+            class:tab-active=move || active.get() == tab
+            on:click=move |_| active.set(tab)
+        >
+            {label}
+        </a>
+    }
+}
 
 #[server]
 pub async fn get_character_sheet(id: String) -> Result<Option<CharacterSheet>, ServerFnError> {
@@ -274,6 +312,219 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
         })
         .collect();
 
+    // Every spell that can be cast, tagged with whether it's a subclass/feat
+    // grant (always prepared) — shared by the Actions tab (filtered by cast
+    // time) and the Spells tab (grouped by level).
+    let all_castables: Vec<(Spell, bool)> = sheet
+        .cantrips
+        .into_iter()
+        .chain(sheet.spells)
+        .map(|spell| (spell, false))
+        .chain(sheet.granted_spells.into_iter().map(|spell| (spell, true)))
+        .collect();
+
+    let progressions: HashMap<String, Option<String>> = resolved_classes
+        .iter()
+        .map(|rc| {
+            let profile = effective_spellcasting(&rc.detail.class, rc.subclass.map(|sd| &sd.subclass));
+            (rc.entry.class_id.clone(), profile.caster_progression)
+        })
+        .collect();
+    let slot_lines: Vec<String> = multiclass_spell_slots(&character.classes, &progressions)
+        .iter()
+        .enumerate()
+        .filter(|(_, count)| **count > 0)
+        .map(|(level, count)| format!("Level {}: {count}", level + 1))
+        .collect();
+    let pact_slot_lines: Vec<String> = multiclass_pact_slots(&character.classes, &progressions)
+        .iter()
+        .enumerate()
+        .filter(|(_, count)| **count > 0)
+        .map(|(level, count)| format!("Level {}: {count}", level + 1))
+        .collect();
+    let caster_lines: Vec<(String, SpellcastingProfile)> = resolved_classes
+        .iter()
+        .filter_map(|rc| {
+            let profile = effective_spellcasting(&rc.detail.class, rc.subclass.map(|sd| &sd.subclass));
+            profile.caster_progression.as_ref()?;
+            Some((rc.detail.class.name.clone(), profile))
+        })
+        .collect();
+    let multiple_casters = caster_lines.len() > 1;
+    // The shared slot pool comes from every non-Pact caster class combined
+    // (`multiclass_spell_slots` already special-cases a solo half/third
+    // caster to use their own table); Pact Magic (Warlock) is tracked as its
+    // own separate row, never merged in.
+    let casting_lines: Vec<String> = caster_lines
+        .iter()
+        .filter_map(|(class_name, profile)| {
+            let code = profile.spellcasting_ability.as_deref()?;
+            let ability_mod = ability_modifier(score_of(code));
+            let line = format!(
+                "Save DC {} · Attack {:+}",
+                spell_save_dc(prof, ability_mod),
+                spell_attack_bonus(prof, ability_mod),
+            );
+            Some(if multiple_casters { format!("{class_name}: {line}") } else { line })
+        })
+        .collect();
+
+    let asi_view = (!ability_asis.is_empty()).then(|| {
+        view! {
+            <div class="card bg-base-100 border border-base-300">
+                <div class="card-body py-3 gap-1">
+                    <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
+                        "Ability Score Improvements"
+                    </h2>
+                    {ability_asis.into_iter().map(|line| view! { <p class="text-sm">{line}</p> }).collect_view()}
+                </div>
+            </div>
+        }
+    });
+
+    let proficiencies_view = view! {
+        <div class="card bg-base-100 border border-base-300">
+            <div class="card-body py-3 gap-2">
+                <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
+                    "Proficiencies & Training"
+                </h2>
+                {(!resolved_classes.is_empty())
+                    .then(|| {
+                        let mut armor = Vec::new();
+                        let mut weapons = Vec::new();
+                        // Class + background grants combined, same as `tool_inputs` in the
+                        // wizard — fixed grants merged with the player's actual picks
+                        // (unlike Armor/Weapons, which have no player-choice slots).
+                        let mut tool_grants: Vec<(String, ToolGrant)> = Vec::new();
+                        for (index, rc) in resolved_classes.iter().enumerate() {
+                            let profs = if index == 0 {
+                                &rc.detail.class.proficiencies
+                            } else {
+                                &rc.detail.class.multiclass_proficiencies
+                            };
+                            armor.extend(profs.armor.iter().cloned());
+                            weapons.extend(profs.weapons.iter().cloned());
+                            tool_grants.extend(profs.tools.iter().cloned().map(|g| (rc.detail.class.name.clone(), g)));
+                        }
+                        if let Some(background) = &sheet.background {
+                            tool_grants
+                                .extend(background.tools.iter().cloned().map(|g| (background.name.clone(), g)));
+                        }
+                        for list in [&mut armor, &mut weapons] {
+                            let mut seen = HashSet::new();
+                            list.retain(|item| seen.insert(item.clone()));
+                        }
+                        let tool_choices: Vec<String> = character
+                            .tool_choices
+                            .iter()
+                            .chain(character.custom_tool_proficiencies.iter())
+                            .cloned()
+                            .collect();
+                        let tools = merge_resolved_names(
+                            &tool_slots(&tool_grants, &[], &HashMap::new()).fixed,
+                            &tool_choices,
+                        );
+                        let line = |label: &str, value: String| {
+                            (!value.is_empty())
+                                .then(|| {
+                                    let label = label.to_string();
+                                    // Only the primary class grants its full armor/weapon/tool set — later classes get `multiclass_proficiencies`, same rule as skills.
+                                    view! {
+                                        <p class="text-sm">
+                                            <span class="font-semibold">{label} ": "</span>
+                                            {value}
+                                        </p>
+                                    }
+                                })
+                        };
+                        view! {
+                            {line("Armor", armor.join(", "))}
+                            {line("Weapons", weapons.join(", "))}
+                            {line("Tools", tools.join(", "))}
+                        }
+                    })}
+                {{
+                    // Background + species grants combined, same as `language_inputs`
+                    // in the wizard — fixed grants merged with the player's picks.
+                    let mut language_grants: Vec<(String, LanguageGrant)> = Vec::new();
+                    if let Some(background) = &sheet.background {
+                        language_grants
+                            .extend(background.languages.iter().cloned().map(|g| (background.name.clone(), g)));
+                    }
+                    if let Some(species) = &sheet.species {
+                        language_grants
+                            .extend(species.languages.iter().cloned().map(|g| (species.name.clone(), g)));
+                    }
+                    let language_choices: Vec<String> = character
+                        .language_choices
+                        .iter()
+                        .chain(character.custom_language_proficiencies.iter())
+                        .cloned()
+                        .collect();
+                    let languages = merge_resolved_names(
+                        &language_slots(&language_grants, &[], &[]).fixed,
+                        &language_choices,
+                    );
+                    (!languages.is_empty())
+                        .then(|| {
+                            view! {
+                                <p class="text-sm">
+                                    <span class="font-semibold">"Languages: "</span>
+                                    {languages.join(", ")}
+                                </p>
+                            }
+                        })
+                }}
+            </div>
+        </div>
+    };
+    let summary_view = view! { <div class="flex flex-col gap-3">{asi_view} {proficiencies_view}</div> }.into_any();
+
+    let species_view = sheet.species.as_ref().filter(|species| !species.entries.is_empty()).map(|species| {
+        feature_section(
+            format!("{} Traits", species.name),
+            species.entries.iter().map(|entry| (None, entry_view(entry).into_any())).collect(),
+        )
+        .into_any()
+    });
+
+    let feats_view = (!sheet.feats.is_empty()).then(|| {
+        feature_section(
+            "Feats".to_string(),
+            sheet
+                .feats
+                .iter()
+                .map(|feat| {
+                    (
+                        Some(format!("{} ({})", feat.name, feat.source)),
+                        feat.entries.iter().map(entry_view).collect_view().into_any(),
+                    )
+                })
+                .collect(),
+        )
+        .into_any()
+    });
+
+    let optional_view = (!sheet.optional_features.is_empty()).then(|| {
+        feature_section(
+            "Optional Features".to_string(),
+            sheet
+                .optional_features
+                .iter()
+                .map(|feature| {
+                    let types = feature.feature_types.iter().map(|t| t.label()).collect::<Vec<_>>().join(", ");
+                    (
+                        Some(format!("{} ({}) — {}", feature.name, feature.source, types)),
+                        feature.entries.iter().map(entry_view).collect_view().into_any(),
+                    )
+                })
+                .collect(),
+        )
+        .into_any()
+    });
+
+    let active_tab = RwSignal::new(SheetTab::Actions);
+
     view! {
         <div class="flex flex-col gap-1">
             <h1 class="font-display text-3xl font-semibold">{character.name.clone()}</h1>
@@ -372,337 +623,47 @@ fn SheetView(sheet: CharacterSheet) -> impl IntoView {
             </div>
         </div>
 
-        {(|| {
-            let progressions: HashMap<String, Option<String>> = resolved_classes
-                .iter()
-                .map(|rc| {
-                    let profile = effective_spellcasting(
-                        &rc.detail.class,
-                        rc.subclass.map(|sd| &sd.subclass),
-                    );
-                    (rc.entry.class_id.clone(), profile.caster_progression)
-                })
-                .collect();
-            let slot_lines: Vec<String> = multiclass_spell_slots(&character.classes, &progressions)
-                .iter()
-                .enumerate()
-                .filter(|(_, count)| **count > 0)
-                .map(|(level, count)| format!("Level {}: {count}", level + 1))
-                .collect();
-            let pact_slot_lines: Vec<String> = multiclass_pact_slots(
-                    &character.classes,
-                    &progressions,
-                )
-                .iter()
-                .enumerate()
-                .filter(|(_, count)| **count > 0)
-                .map(|(level, count)| format!("Level {}: {count}", level + 1))
-                .collect();
-            let caster_lines: Vec<(String, SpellcastingProfile)> = resolved_classes
-                .iter()
-                .filter_map(|rc| {
-                    let profile = effective_spellcasting(
-                        &rc.detail.class,
-                        rc.subclass.map(|sd| &sd.subclass),
-                    );
-                    profile.caster_progression.as_ref()?;
-                    Some((rc.detail.class.name.clone(), profile))
-                })
-                .collect();
-            if slot_lines.is_empty() && pact_slot_lines.is_empty() && sheet.cantrips.is_empty()
-                && sheet.spells.is_empty() && sheet.granted_spells.is_empty()
-            {
-                return None;
-            }
-            let multiple_casters = caster_lines.len() > 1;
-            let casting_lines: Vec<String> = caster_lines
-                .iter()
-                .filter_map(|(class_name, profile)| {
-                    let code = profile.spellcasting_ability.as_deref()?;
-                    let ability_mod = ability_modifier(score_of(code));
-                    let line = format!(
-                        "Save DC {} · Attack {:+}",
-                        spell_save_dc(prof, ability_mod),
-                        spell_attack_bonus(prof, ability_mod),
-                    );
-                    Some(if multiple_casters { format!("{class_name}: {line}") } else { line })
-                })
-                .collect();
-            Some(
-                // The shared slot pool comes from every non-Pact caster class
-                // combined (`multiclass_spell_slots` already special-cases a
-                // solo half/third caster to use their own table); Pact Magic
-                // (Warlock) is tracked as its own separate row, never merged in.
-                view! {
-                    <div class="card bg-base-100 border border-base-300">
-                        <div class="card-body py-3 gap-1">
-                            <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
-                                "Spells"
-                            </h2>
-                            {casting_lines
-                                .into_iter()
-                                .map(|line| view! { <p class="text-sm">{line}</p> })
-                                .collect_view()}
-                            {(!slot_lines.is_empty())
-                                .then(|| {
-                                    view! {
-                                        <p class="text-sm">
-                                            {format!("Slots — {}", slot_lines.join(", "))}
-                                        </p>
-                                    }
-                                })}
-                            {(!pact_slot_lines.is_empty())
-                                .then(|| {
-                                    view! {
-                                        <p class="text-sm">
-                                            {format!(
-                                                "Pact Magic slots — {}",
-                                                pact_slot_lines.join(", "),
-                                            )}
-                                        </p>
-                                    }
-                                })}
-                            {(!sheet.cantrips.is_empty())
-                                .then(|| {
-                                    let names = sheet
-                                        .cantrips
-                                        .iter()
-                                        .map(|spell| spell.name.clone())
-                                        .collect::<Vec<_>>()
-                                        .join(", ");
-                                    view! {
-                                        <p class="text-sm">
-                                            <span class="font-semibold">"Cantrips: "</span>
-                                            {names}
-                                        </p>
-                                    }
-                                })}
-                            {(!sheet.spells.is_empty())
-                                .then(|| {
-                                    view! {
-                                        <div class="flex flex-col gap-1">
-                                            <span class="font-semibold text-sm">"Spells known:"</span>
-                                            {sheet
-                                                .spells
-                                                .iter()
-                                                .map(|spell| {
-                                                    let line = format!(
-                                                        "{} (L{} {})",
-                                                        spell.name,
-                                                        spell.level,
-                                                        spell.school.label(),
-                                                    );
-                                                    view! { <p class="text-sm">{line}</p> }
-                                                })
-                                                .collect_view()}
-                                        </div>
-                                    }
-                                })}
-                            {(!sheet.granted_spells.is_empty())
-                                .then(|| {
-                                    view! {
-                                        <div class="flex flex-col gap-1">
-                                            <span class="font-semibold text-sm">
-                                                "Granted spells (always prepared):"
-                                            </span>
-                                            {sheet
-                                                .granted_spells
-                                                .iter()
-                                                .map(|spell| {
-                                                    let line = if spell.level == 0 {
-                                                        format!("{} (Cantrip)", spell.name)
-                                                    } else {
-                                                        format!(
-                                                            "{} (L{} {})",
-                                                            spell.name,
-                                                            spell.level,
-                                                            spell.school.label(),
-                                                        )
-                                                    };
-                                                    view! { <p class="text-sm">{line}</p> }
-                                                })
-                                                .collect_view()}
-                                        </div>
-                                    }
-                                })}
-                        </div>
-                    </div>
-                },
-            )
-        })()}
-
-        {(!ability_asis.is_empty())
-            .then(|| {
-                view! {
-                    <div class="card bg-base-100 border border-base-300">
-                        <div class="card-body py-3 gap-1">
-                            <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
-                                "Ability Score Improvements"
-                            </h2>
-                            {ability_asis
-                                .into_iter()
-                                .map(|line| view! { <p class="text-sm">{line}</p> })
-                                .collect_view()}
-                        </div>
-                    </div>
-                }
-            })}
-
-        <div class="card bg-base-100 border border-base-300">
-            <div class="card-body py-3 gap-2">
-                <h2 class="font-mono text-[0.7rem] tracking-[0.15em] uppercase text-primary/80 pb-1 border-b border-base-300">
-                    "Proficiencies & Training"
-                </h2>
-                {(!resolved_classes.is_empty())
-                    .then(|| {
-                        let mut armor = Vec::new();
-                        let mut weapons = Vec::new();
-                        // Class + background grants combined, same as `tool_inputs` in the
-                        // wizard — fixed grants merged with the player's actual picks
-                        // (unlike Armor/Weapons, which have no player-choice slots).
-                        let mut tool_grants: Vec<(String, ToolGrant)> = Vec::new();
-                        for (index, rc) in resolved_classes.iter().enumerate() {
-                            let profs = if index == 0 {
-                                &rc.detail.class.proficiencies
-                            } else {
-                                &rc.detail.class.multiclass_proficiencies
-                            };
-                            armor.extend(profs.armor.iter().cloned());
-                            weapons.extend(profs.weapons.iter().cloned());
-                            tool_grants.extend(profs.tools.iter().cloned().map(|g| (rc.detail.class.name.clone(), g)));
-                        }
-                        if let Some(background) = &sheet.background {
-                            tool_grants
-                                .extend(background.tools.iter().cloned().map(|g| (background.name.clone(), g)));
-                        }
-                        for list in [&mut armor, &mut weapons] {
-                            let mut seen = HashSet::new();
-                            list.retain(|item| seen.insert(item.clone()));
-                        }
-                        let tool_choices: Vec<String> = character
-                            .tool_choices
-                            .iter()
-                            .chain(character.custom_tool_proficiencies.iter())
-                            .cloned()
-                            .collect();
-                        let tools = merge_resolved_names(
-                            &tool_slots(&tool_grants, &[], &HashMap::new()).fixed,
-                            &tool_choices,
-                        );
-                        let line = |label: &str, value: String| {
-                            (!value.is_empty())
-                                .then(|| {
-                                    let label = label.to_string();
-                                    // Only the primary class grants its full armor/weapon/tool set — later classes get `multiclass_proficiencies`, same rule as skills.
-                                    view! {
-                                        <p class="text-sm">
-                                            <span class="font-semibold">{label} ": "</span>
-                                            {value}
-                                        </p>
-                                    }
-                                })
-                        };
-                        view! {
-                            {line("Armor", armor.join(", "))}
-                            {line("Weapons", weapons.join(", "))}
-                            {line("Tools", tools.join(", "))}
-                        }
-                    })}
-                {{
-                    // Background + species grants combined, same as `language_inputs`
-                    // in the wizard — fixed grants merged with the player's picks.
-                    let mut language_grants: Vec<(String, LanguageGrant)> = Vec::new();
-                    if let Some(background) = &sheet.background {
-                        language_grants
-                            .extend(background.languages.iter().cloned().map(|g| (background.name.clone(), g)));
-                    }
-                    if let Some(species) = &sheet.species {
-                        language_grants
-                            .extend(species.languages.iter().cloned().map(|g| (species.name.clone(), g)));
-                    }
-                    let language_choices: Vec<String> = character
-                        .language_choices
-                        .iter()
-                        .chain(character.custom_language_proficiencies.iter())
-                        .cloned()
-                        .collect();
-                    let languages = merge_resolved_names(
-                        &language_slots(&language_grants, &[], &[]).fixed,
-                        &language_choices,
-                    );
-                    (!languages.is_empty())
-                        .then(|| {
-                            view! {
-                                <p class="text-sm">
-                                    <span class="font-semibold">"Languages: "</span>
-                                    {languages.join(", ")}
-                                </p>
-                            }
-                        })
-                }}
-            </div>
+        <div role="tablist" class="tabs tabs-lift mt-2 flex-wrap">
+            {tab_link("Actions", SheetTab::Actions, active_tab)}
+            {tab_link("Spells", SheetTab::Spells, active_tab)}
+            {tab_link("Features", SheetTab::Features, active_tab)}
+            {tab_link("Inventory", SheetTab::Inventory, active_tab)}
+            {tab_link("Notes", SheetTab::Notes, active_tab)}
         </div>
 
-        {sheet
-            .species
-            .as_ref()
-            .filter(|species| !species.entries.is_empty())
-            .map(|species| {
-                feature_section(
-                    format!("{} Traits", species.name),
-                    species
-                        .entries
-                        .iter()
-                        .map(|entry| (None, entry_view(entry).into_any()))
-                        .collect(),
-                )
-            })}
-
-        {class_feature_sections.into_iter().collect_view()}
-
-        {subclass_feature_sections.into_iter().collect_view()}
-
-        {(!sheet.feats.is_empty())
-            .then(|| {
-                feature_section(
-                    "Feats".to_string(),
-                    sheet
-                        .feats
-                        .iter()
-                        .map(|feat| {
-                            (
-                                Some(format!("{} ({})", feat.name, feat.source)),
-                                feat.entries.iter().map(entry_view).collect_view().into_any(),
-                            )
-                        })
-                        .collect(),
-                )
-            })}
-
-        {(!sheet.optional_features.is_empty())
-            .then(|| {
-                feature_section(
-                    "Optional Features".to_string(),
-                    sheet
-                        .optional_features
-                        .iter()
-                        .map(|feature| {
-                            let types = feature
-                                .feature_types
-                                .iter()
-                                .map(|t| t.label())
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            (
-                                Some(
-                                    format!("{} ({}) — {}", feature.name, feature.source, types),
-                                ),
-                                feature.entries.iter().map(entry_view).collect_view().into_any(),
-                            )
-                        })
-                        .collect(),
-                )
-            })}
+        <div class="pt-2" class:hidden=move || active_tab.get() != SheetTab::Actions>
+            <ActionsTab all_castables=all_castables.clone() />
+        </div>
+        <div class="pt-2" class:hidden=move || active_tab.get() != SheetTab::Spells>
+            <SpellsTab
+                casting_lines=casting_lines
+                slot_lines=slot_lines
+                pact_slot_lines=pact_slot_lines
+                all_castables=all_castables
+            />
+        </div>
+        <div class="pt-2" class:hidden=move || active_tab.get() != SheetTab::Features>
+            <FeaturesTab
+                summary=summary_view
+                species=species_view
+                class_sections=class_feature_sections
+                subclass_sections=subclass_feature_sections
+                feats=feats_view
+                optional=optional_view
+            />
+        </div>
+        <div class="pt-2" class:hidden=move || active_tab.get() != SheetTab::Inventory>
+            <PlaceholderTab
+                title="Inventory isn't tracked yet"
+                body="Guidance doesn't yet have a way to attach items to a character. This tab is reserved for that — check back in a future update."
+            />
+        </div>
+        <div class="pt-2" class:hidden=move || active_tab.get() != SheetTab::Notes>
+            <PlaceholderTab
+                title="Notes aren't tracked yet"
+                body="There's no place to jot down character notes yet — this tab is reserved for that."
+            />
+        </div>
     }
 }
 
